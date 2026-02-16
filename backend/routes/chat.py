@@ -1,0 +1,272 @@
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
+from database import get_db
+from services.chat_service import stream_chat_completion, non_stream_chat_completion
+from services.tool_service import execute_tool, get_tool_schema_for_llm
+import uuid
+import json
+import asyncio
+
+router = APIRouter()
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+    tool_call_id: Optional[str] = None
+    tool_calls: Optional[list] = None
+
+class ChatRequest(BaseModel):
+    conversation_id: Optional[str] = None
+    provider_id: str
+    model_id: str
+    messages: List[ChatMessage]
+    system_prompt: Optional[str] = None
+    tools: Optional[List[str]] = []
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = 4096
+    stream: Optional[bool] = True
+
+class ConversationCreate(BaseModel):
+    title: str
+    model_id: Optional[str] = None
+    provider_id: Optional[str] = None
+    system_prompt: Optional[str] = None
+
+
+@router.post("/completions")
+async def chat_completions(request: ChatRequest):
+    db = await get_db()
+    try:
+        # Get provider info
+        cursor = await db.execute("SELECT * FROM providers WHERE id = ?", (request.provider_id,))
+        provider = await cursor.fetchone()
+        if not provider:
+            raise HTTPException(status_code=404, detail="Provider not found")
+        provider = dict(provider)
+
+        # Build messages
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+        for msg in request.messages:
+            m = {"role": msg.role, "content": msg.content}
+            if msg.tool_call_id:
+                m["tool_call_id"] = msg.tool_call_id
+            if msg.tool_calls:
+                m["tool_calls"] = msg.tool_calls
+            messages.append(m)
+
+        # Get tool schemas if tools requested
+        tool_schemas = None
+        if request.tools:
+            tool_schemas = []
+            for tool_id in request.tools:
+                tc = await db.execute("SELECT * FROM tools WHERE id = ? AND is_enabled = 1", (tool_id,))
+                tool_row = await tc.fetchone()
+                if tool_row:
+                    tool = dict(tool_row)
+                    tool["parameters_schema"] = json.loads(tool.get("parameters_schema", "{}"))
+                    tool_schemas.append(get_tool_schema_for_llm(tool))
+
+        # Create or update conversation
+        conv_id = request.conversation_id
+        if not conv_id:
+            conv_id = str(uuid.uuid4())
+            now = datetime.utcnow().isoformat()
+            await db.execute(
+                """INSERT INTO conversations (id, title, model_id, provider_id, system_prompt, tools, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (conv_id, request.messages[0].content[:50] + "..." if request.messages else "New Chat",
+                 request.model_id, request.provider_id, request.system_prompt, json.dumps(request.tools or []), now, now)
+            )
+            await db.commit()
+
+        # Save user message
+        user_msg = request.messages[-1] if request.messages else None
+        if user_msg and user_msg.role == "user":
+            msg_id = str(uuid.uuid4())
+            now = datetime.utcnow().isoformat()
+            await db.execute(
+                """INSERT INTO messages (id, conversation_id, role, content, model_id, created_at)
+                   VALUES (?, ?, 'user', ?, ?, ?)""",
+                (msg_id, conv_id, user_msg.content, request.model_id, now)
+            )
+            await db.commit()
+
+    finally:
+        await db.close()
+
+    if request.stream:
+        async def event_stream():
+            full_content = ""
+            async for chunk in stream_chat_completion(
+                provider_type=provider["type"],
+                model_id=request.model_id,
+                messages=messages,
+                api_key=provider["api_key_encrypted"],
+                base_url=provider.get("base_url"),
+                tools=tool_schemas,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                provider_id=provider["id"],
+                provider_name=provider["name"],
+                conversation_id=conv_id,
+            ):
+                if chunk["type"] == "content":
+                    full_content += chunk["content"]
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+            # Save assistant message
+            if full_content:
+                db2 = await get_db()
+                try:
+                    amsg_id = str(uuid.uuid4())
+                    now = datetime.utcnow().isoformat()
+                    await db2.execute(
+                        """INSERT INTO messages (id, conversation_id, role, content, model_id, created_at)
+                           VALUES (?, ?, 'assistant', ?, ?, ?)""",
+                        (amsg_id, conv_id, full_content, request.model_id, now)
+                    )
+                    await db2.commit()
+                finally:
+                    await db2.close()
+
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': conv_id})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+    else:
+        result = await non_stream_chat_completion(
+            provider_type=provider["type"],
+            model_id=request.model_id,
+            messages=messages,
+            api_key=provider["api_key_encrypted"],
+            base_url=provider.get("base_url"),
+            tools=tool_schemas,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            provider_id=provider["id"],
+            provider_name=provider["name"],
+            conversation_id=conv_id,
+        )
+
+        # Save assistant message
+        db2 = await get_db()
+        try:
+            amsg_id = str(uuid.uuid4())
+            now = datetime.utcnow().isoformat()
+            await db2.execute(
+                """INSERT INTO messages (id, conversation_id, role, content, model_id, created_at)
+                   VALUES (?, ?, 'assistant', ?, ?, ?)""",
+                (amsg_id, conv_id, result["content"], request.model_id, now)
+            )
+            await db2.commit()
+        finally:
+            await db2.close()
+
+        result["conversation_id"] = conv_id
+        return result
+
+
+@router.get("/conversations")
+async def list_conversations():
+    db = await get_db()
+    try:
+        cursor = await db.execute("""
+            SELECT c.*, (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as message_count
+            FROM conversations c ORDER BY c.updated_at DESC
+        """)
+        rows = await cursor.fetchall()
+        convos = []
+        for row in rows:
+            c = dict(row)
+            c["tools"] = json.loads(c.get("tools", "[]"))
+            c["mcp_servers"] = json.loads(c.get("mcp_servers", "[]"))
+            convos.append(c)
+        return {"conversations": convos}
+    finally:
+        await db.close()
+
+
+@router.post("/conversations")
+async def create_conversation(conv: ConversationCreate):
+    conv_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT INTO conversations (id, title, model_id, provider_id, system_prompt, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (conv_id, conv.title, conv.model_id, conv.provider_id, conv.system_prompt, now, now)
+        )
+        await db.commit()
+        return {"id": conv_id, "title": conv.title, "created_at": now}
+    finally:
+        await db.close()
+
+
+@router.get("/conversations/{conv_id}")
+async def get_conversation(conv_id: str):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM conversations WHERE id = ?", (conv_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        c = dict(row)
+        c["tools"] = json.loads(c.get("tools", "[]"))
+        c["mcp_servers"] = json.loads(c.get("mcp_servers", "[]"))
+        return c
+    finally:
+        await db.close()
+
+
+@router.delete("/conversations/{conv_id}")
+async def delete_conversation(conv_id: str):
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+        await db.commit()
+        return {"deleted": True}
+    finally:
+        await db.close()
+
+
+@router.get("/conversations/{conv_id}/messages")
+async def get_messages(conv_id: str):
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
+            (conv_id,)
+        )
+        rows = await cursor.fetchall()
+        messages = []
+        for row in rows:
+            m = dict(row)
+            m["tokens_used"] = json.loads(m.get("tokens_used", "{}"))
+            if m.get("tool_calls"):
+                m["tool_calls"] = json.loads(m["tool_calls"])
+            messages.append(m)
+        return {"messages": messages}
+    finally:
+        await db.close()
+
+
+@router.post("/tools/execute")
+async def execute_tool_in_chat(tool_name: str, parameters: dict):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM tools WHERE name = ?", (tool_name,))
+        row = await cursor.fetchone()
+        code = None
+        if row:
+            tool = dict(row)
+            code = tool.get("code")
+    finally:
+        await db.close()
+
+    result = await execute_tool(tool_name, parameters, code)
+    return {"result": result}
