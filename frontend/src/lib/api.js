@@ -1,0 +1,109 @@
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+
+export async function apiFetch(path, options = {}) {
+    const url = `${API_BASE}${path}`;
+    const config = {
+        headers: {
+            'Content-Type': 'application/json',
+            ...options.headers,
+        },
+        ...options,
+    };
+
+    const res = await fetch(url, config);
+
+    if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(error.detail || `API Error: ${res.status}`);
+    }
+
+    return res.json();
+}
+
+export function apiStream(path, options = {}) {
+    const url = `${API_BASE}${path}`;
+    return fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...options.headers,
+        },
+        ...options,
+    });
+}
+
+export const api = {
+    // Providers
+    getProviders: () => apiFetch('/providers'),
+    createProvider: (data) => apiFetch('/providers', { method: 'POST', body: JSON.stringify(data) }),
+    getProvider: (id) => apiFetch(`/providers/${id}`),
+    updateProvider: (id, data) => apiFetch(`/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteProvider: (id) => apiFetch(`/providers/${id}`, { method: 'DELETE' }),
+    getProviderModels: (id) => apiFetch(`/providers/${id}/models`),
+    refreshModels: (id) => apiFetch(`/providers/${id}/refresh-models`, { method: 'POST' }),
+    validateProvider: (id) => apiFetch(`/providers/${id}/validate`),
+
+    // Tools
+    getTools: () => apiFetch('/tools'),
+    createTool: (data) => apiFetch('/tools', { method: 'POST', body: JSON.stringify(data) }),
+    getTool: (id) => apiFetch(`/tools/${id}`),
+    updateTool: (id, data) => apiFetch(`/tools/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteTool: (id) => apiFetch(`/tools/${id}`, { method: 'DELETE' }),
+    testTool: (id, params) => apiFetch(`/tools/${id}/test`, { method: 'POST', body: JSON.stringify({ parameters: params }) }),
+
+    // MCP
+    getMCPServers: () => apiFetch('/mcp'),
+    createMCPServer: (data) => apiFetch('/mcp', { method: 'POST', body: JSON.stringify(data) }),
+    getMCPServer: (id) => apiFetch(`/mcp/${id}`),
+    updateMCPServer: (id, data) => apiFetch(`/mcp/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteMCPServer: (id) => apiFetch(`/mcp/${id}`, { method: 'DELETE' }),
+    startMCPServer: (id) => apiFetch(`/mcp/${id}/start`, { method: 'POST' }),
+    stopMCPServer: (id) => apiFetch(`/mcp/${id}/stop`, { method: 'POST' }),
+    restartMCPServer: (id) => apiFetch(`/mcp/${id}/restart`, { method: 'POST' }),
+    getMCPTools: (id) => apiFetch(`/mcp/${id}/tools`),
+    executeMCPTool: (id, data) => apiFetch(`/mcp/${id}/execute`, { method: 'POST', body: JSON.stringify(data) }),
+
+    // Chat
+    getConversations: () => apiFetch('/chat/conversations'),
+    createConversation: (data) => apiFetch('/chat/conversations', { method: 'POST', body: JSON.stringify(data) }),
+    getConversation: (id) => apiFetch(`/chat/conversations/${id}`),
+    deleteConversation: (id) => apiFetch(`/chat/conversations/${id}`, { method: 'DELETE' }),
+    getMessages: (id) => apiFetch(`/chat/conversations/${id}/messages`),
+
+    // Workflows
+    getWorkflows: () => apiFetch('/workflows'),
+    createWorkflow: (data) => apiFetch('/workflows', { method: 'POST', body: JSON.stringify(data) }),
+    getWorkflow: (id) => apiFetch(`/workflows/${id}`),
+    updateWorkflow: (id, data) => apiFetch(`/workflows/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteWorkflow: (id) => apiFetch(`/workflows/${id}`, { method: 'DELETE' }),
+    executeWorkflow: (id, data) => apiFetch(`/workflows/${id}/execute`, { method: 'POST', body: JSON.stringify(data) }),
+    getWorkflowExecutions: (id) => apiFetch(`/workflows/${id}/executions`),
+    getWorkflowExecution: (wfId, execId) => apiFetch(`/workflows/${wfId}/executions/${execId}`),
+
+    // Observability
+    getLogs: (params = {}) => {
+        const qs = new URLSearchParams(params).toString();
+        return apiFetch(`/observability/logs?${qs}`);
+    },
+    getLog: (id) => apiFetch(`/observability/logs/${id}`),
+    getStats: (params = {}) => {
+        const qs = new URLSearchParams(params).toString();
+        return apiFetch(`/observability/stats?${qs}`);
+    },
+    getTimeseries: (params = {}) => {
+        const qs = new URLSearchParams(params).toString();
+        return apiFetch(`/observability/stats/timeseries?${qs}`);
+    },
+
+    // Agents
+    getAgents: () => apiFetch('/agents'),
+    createAgent: (data) => apiFetch('/agents', { method: 'POST', body: JSON.stringify(data) }),
+    getAgent: (id) => apiFetch(`/agents/${id}`),
+    updateAgent: (id, data) => apiFetch(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteAgent: (id) => apiFetch(`/agents/${id}`, { method: 'DELETE' }),
+    queryAgent: (id, data) => apiFetch(`/agents/${id}/query`, { method: 'POST', body: JSON.stringify({ ...data, stream: false }) }),
+    getAgentConversations: (id) => apiFetch(`/agents/${id}/conversations`),
+
+    // Workflow Query
+    queryWorkflow: (id, data) => apiFetch(`/workflows/${id}/query`, { method: 'POST', body: JSON.stringify(data) }),
+};
