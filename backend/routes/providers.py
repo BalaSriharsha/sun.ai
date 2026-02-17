@@ -14,12 +14,14 @@ class ProviderCreate(BaseModel):
     type: str  # openai, anthropic, google, groq, mistral, ollama, openrouter
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+    api_version: Optional[str] = None
     config: Optional[dict] = {}
 
 class ProviderUpdate(BaseModel):
     name: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+    api_version: Optional[str] = None
     status: Optional[str] = None
     config: Optional[dict] = None
 
@@ -63,7 +65,7 @@ async def create_provider(provider: ProviderCreate):
     if provider.type != "ollama" and not provider.api_key:
         raise HTTPException(status_code=400, detail="API key is required for this provider type")
 
-    is_valid = await validate_api_key(provider.type, provider.api_key or "", provider.base_url)
+    is_valid = await validate_api_key(provider.type, provider.api_key or "", provider.base_url, provider.api_version)
     if not is_valid:
         raise HTTPException(status_code=400, detail="Invalid API key or provider is unreachable")
 
@@ -73,16 +75,16 @@ async def create_provider(provider: ProviderCreate):
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO providers (id, workspace_id, name, type, api_key_encrypted, base_url, status, config, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)""",
+            """INSERT INTO providers (id, workspace_id, name, type, api_key_encrypted, base_url, api_version, status, config, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)""",
             (provider_id, provider.config.get("workspace_id") if provider.config else None,
-             provider.name, provider.type, provider.api_key, provider.base_url,
+             provider.name, provider.type, provider.api_key, provider.base_url, provider.api_version,
              json.dumps(provider.config or {}), now, now)
         )
         await db.commit()
 
         # Discover models
-        models = await discover_models(provider_id, provider.type, provider.api_key or "", provider.base_url)
+        models = await discover_models(provider_id, provider.type, provider.api_key or "", provider.base_url, provider.api_version)
 
         return {
             "id": provider_id,
@@ -129,19 +131,20 @@ async def update_provider(provider_id: str, update: ProviderUpdate):
         name = update.name or existing["name"]
         api_key = update.api_key or existing["api_key_encrypted"]
         base_url = update.base_url if update.base_url is not None else existing["base_url"]
+        api_version = update.api_version if update.api_version is not None else existing.get("api_version")
         status = update.status or existing["status"]
         config = json.dumps(update.config) if update.config is not None else existing["config"]
 
         await db.execute(
-            """UPDATE providers SET name=?, api_key_encrypted=?, base_url=?, status=?, config=?, updated_at=?
+            """UPDATE providers SET name=?, api_key_encrypted=?, base_url=?, api_version=?, status=?, config=?, updated_at=?
                WHERE id=?""",
-            (name, api_key, base_url, status, config, now, provider_id)
+            (name, api_key, base_url, api_version, status, config, now, provider_id)
         )
         await db.commit()
 
         # Re-discover models if API key changed
         if update.api_key:
-            await discover_models(provider_id, existing["type"], api_key, base_url)
+            await discover_models(provider_id, existing["type"], api_key, base_url, api_version)
 
         return {"id": provider_id, "name": name, "status": status, "updated_at": now}
     finally:
@@ -190,7 +193,7 @@ async def refresh_models(provider_id: str):
         if not provider:
             raise HTTPException(status_code=404, detail="Provider not found")
         p = dict(provider)
-        models = await discover_models(provider_id, p["type"], p["api_key_encrypted"] or "", p["base_url"])
+        models = await discover_models(provider_id, p["type"], p["api_key_encrypted"] or "", p["base_url"], p.get("api_version"))
         return {"models": models, "count": len(models)}
     finally:
         await db.close()
@@ -205,7 +208,7 @@ async def validate_provider(provider_id: str):
         if not provider:
             raise HTTPException(status_code=404, detail="Provider not found")
         p = dict(provider)
-        is_valid = await validate_api_key(p["type"], p["api_key_encrypted"] or "", p["base_url"])
+        is_valid = await validate_api_key(p["type"], p["api_key_encrypted"] or "", p["base_url"], p.get("api_version"))
         if is_valid:
             await db.execute("UPDATE providers SET status='active', updated_at=? WHERE id=?",
                            (datetime.utcnow().isoformat(), provider_id))

@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import { Plus, Bot, Play, Trash2, Edit, X, Wrench, Cpu, Send, ChevronDown, ChevronRight, Server } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export default function AgentsPage() {
     const [agents, setAgents] = useState([]);
@@ -267,9 +269,11 @@ export default function AgentsPage() {
                                             {testResult.result.content && (
                                                 <div style={{
                                                     padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)',
-                                                    fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap'
-                                                }}>
-                                                    {testResult.result.content}
+                                                    fontSize: 13, lineHeight: 1.6
+                                                }} className="markdown-content">
+                                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                        {testResult.result.content}
+                                                    </ReactMarkdown>
                                                 </div>
                                             )}
                                             {testResult.result.error && (

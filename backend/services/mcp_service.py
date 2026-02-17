@@ -4,6 +4,7 @@ import subprocess
 import os
 import signal
 import asyncio
+import threading
 from datetime import datetime
 from database import get_db
 
@@ -133,6 +134,25 @@ BUILTIN_MCP_SERVERS = [
 ]
 
 _running_processes = {}
+_output_readers = {}  # Store output reader threads to keep them alive
+
+
+def _drain_pipe(pipe, server_id: str, pipe_name: str):
+    """Background thread to drain pipe output and prevent buffer overflow."""
+    try:
+        while True:
+            line = pipe.readline()
+            if not line:
+                break
+            # Optionally log output for debugging
+            # print(f"[MCP {server_id}] {pipe_name}: {line.decode('utf-8', errors='replace').strip()}")
+    except Exception:
+        pass
+    finally:
+        try:
+            pipe.close()
+        except Exception:
+            pass
 
 
 async def seed_builtin_mcp_servers():
@@ -176,15 +196,35 @@ async def start_mcp_server(server_id: str) -> dict:
         full_args = [command] + args
 
         try:
+            # Use start_new_session to prevent signal propagation from parent
+            # Use subprocess.DEVNULL for stdin since we don't write to it
+            # Keep stdout/stderr pipes but drain them in background threads
             process = subprocess.Popen(
                 full_args,
-                stdin=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=backend_dir,
-                env=env
+                env=env,
+                start_new_session=True,  # Prevent signals from propagating
             )
             _running_processes[server_id] = process
+
+            # Start background threads to drain stdout and stderr
+            # This prevents buffer overflow which causes process hangs
+            stdout_thread = threading.Thread(
+                target=_drain_pipe,
+                args=(process.stdout, server_id, "stdout"),
+                daemon=True
+            )
+            stderr_thread = threading.Thread(
+                target=_drain_pipe,
+                args=(process.stderr, server_id, "stderr"),
+                daemon=True
+            )
+            stdout_thread.start()
+            stderr_thread.start()
+            _output_readers[server_id] = (stdout_thread, stderr_thread)
 
             await db.execute(
                 "UPDATE mcp_servers SET status='running', pid=?, updated_at=? WHERE id=?",
@@ -203,14 +243,26 @@ async def stop_mcp_server(server_id: str) -> dict:
     if server_id in _running_processes:
         process = _running_processes[server_id]
         try:
-            process.terminate()
+            # Terminate the process group (since we used start_new_session)
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                # Process might already be gone, try direct terminate
+                process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                process.kill()
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    process.kill()
             del _running_processes[server_id]
         except Exception:
             pass
+
+    # Clean up reader threads reference (they're daemon threads, so they'll die with process)
+    if server_id in _output_readers:
+        del _output_readers[server_id]
 
     db = await get_db()
     try:
@@ -231,6 +283,9 @@ async def get_server_status(server_id: str) -> str:
             return "running"
         else:
             del _running_processes[server_id]
+            # Clean up reader threads reference
+            if server_id in _output_readers:
+                del _output_readers[server_id]
             db = await get_db()
             try:
                 await db.execute(

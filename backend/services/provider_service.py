@@ -3,6 +3,11 @@ import json
 from datetime import datetime
 from database import get_db
 import uuid
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+# Thread pool for running boto3 synchronous calls
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 MODEL_PRICING = {
@@ -31,15 +36,52 @@ MODEL_PRICING = {
     "mistral-small-latest": {"input": 0.0002, "output": 0.0006},
     "codestral-latest": {"input": 0.0003, "output": 0.0009},
     "open-mistral-nemo": {"input": 0.00015, "output": 0.00015},
-    # AWS Bedrock models
+    # AWS Bedrock models - Anthropic Claude
     "anthropic.claude-3-5-sonnet-20241022-v2:0": {"input": 0.003, "output": 0.015},
     "anthropic.claude-3-5-haiku-20241022-v1:0": {"input": 0.001, "output": 0.005},
     "anthropic.claude-3-opus-20240229-v1:0": {"input": 0.015, "output": 0.075},
+    "anthropic.claude-3-sonnet-20240229-v1:0": {"input": 0.003, "output": 0.015},
+    "anthropic.claude-3-haiku-20240307-v1:0": {"input": 0.00025, "output": 0.00125},
+    "anthropic.claude-v2:1": {"input": 0.008, "output": 0.024},
+    "anthropic.claude-v2": {"input": 0.008, "output": 0.024},
+    "anthropic.claude-instant-v1": {"input": 0.0008, "output": 0.0024},
+    # AWS Bedrock models - Amazon Titan
     "amazon.titan-text-premier-v1:0": {"input": 0.0005, "output": 0.0015},
     "amazon.titan-text-express-v1": {"input": 0.0002, "output": 0.0006},
+    "amazon.titan-text-lite-v1": {"input": 0.00015, "output": 0.0002},
+    "amazon.titan-embed-text-v1": {"input": 0.0001, "output": 0.0},
+    "amazon.titan-embed-text-v2:0": {"input": 0.00002, "output": 0.0},
+    # AWS Bedrock models - Meta Llama
+    "meta.llama3-2-90b-instruct-v1:0": {"input": 0.002, "output": 0.002},
+    "meta.llama3-2-11b-instruct-v1:0": {"input": 0.00035, "output": 0.00035},
+    "meta.llama3-2-3b-instruct-v1:0": {"input": 0.00015, "output": 0.00015},
+    "meta.llama3-2-1b-instruct-v1:0": {"input": 0.0001, "output": 0.0001},
+    "meta.llama3-1-405b-instruct-v1:0": {"input": 0.00532, "output": 0.016},
     "meta.llama3-1-70b-instruct-v1:0": {"input": 0.00099, "output": 0.00099},
     "meta.llama3-1-8b-instruct-v1:0": {"input": 0.00022, "output": 0.00022},
+    "meta.llama3-70b-instruct-v1:0": {"input": 0.00265, "output": 0.0035},
+    "meta.llama3-8b-instruct-v1:0": {"input": 0.0003, "output": 0.0006},
+    "meta.llama2-70b-chat-v1": {"input": 0.00195, "output": 0.00256},
+    "meta.llama2-13b-chat-v1": {"input": 0.00075, "output": 0.001},
+    # AWS Bedrock models - Mistral
     "mistral.mistral-large-2407-v1:0": {"input": 0.002, "output": 0.006},
+    "mistral.mistral-large-2402-v1:0": {"input": 0.002, "output": 0.006},
+    "mistral.mistral-small-2402-v1:0": {"input": 0.0001, "output": 0.0003},
+    "mistral.mixtral-8x7b-instruct-v0:1": {"input": 0.00045, "output": 0.0007},
+    "mistral.mistral-7b-instruct-v0:2": {"input": 0.00015, "output": 0.0002},
+    # AWS Bedrock models - Cohere
+    "cohere.command-r-plus-v1:0": {"input": 0.003, "output": 0.015},
+    "cohere.command-r-v1:0": {"input": 0.0005, "output": 0.0015},
+    "cohere.command-text-v14": {"input": 0.0015, "output": 0.002},
+    "cohere.command-light-text-v14": {"input": 0.0003, "output": 0.0006},
+    "cohere.embed-english-v3": {"input": 0.0001, "output": 0.0},
+    "cohere.embed-multilingual-v3": {"input": 0.0001, "output": 0.0},
+    # AWS Bedrock models - AI21
+    "ai21.jamba-1-5-large-v1:0": {"input": 0.002, "output": 0.008},
+    "ai21.jamba-1-5-mini-v1:0": {"input": 0.0002, "output": 0.0004},
+    "ai21.jamba-instruct-v1:0": {"input": 0.0005, "output": 0.0007},
+    "ai21.j2-ultra-v1": {"input": 0.0188, "output": 0.0188},
+    "ai21.j2-mid-v1": {"input": 0.0125, "output": 0.0125},
     # Sarvam AI models
     "sarvam-m": {"input": 0.0003, "output": 0.0009},
     "sarvam-translate": {"input": 0.0001, "output": 0.0003},
@@ -77,7 +119,12 @@ VISION_MODELS = {
     "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
     "claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307",
     "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash",
-    "anthropic.claude-3-5-sonnet-20241022-v2:0", "anthropic.claude-3-opus-20240229-v1:0",
+    # Bedrock Claude vision models
+    "anthropic.claude-3-5-sonnet-20241022-v2:0", "anthropic.claude-3-5-haiku-20241022-v1:0",
+    "anthropic.claude-3-opus-20240229-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0",
+    "anthropic.claude-3-haiku-20240307-v1:0",
+    # Bedrock Llama 3.2 vision models
+    "meta.llama3-2-90b-instruct-v1:0", "meta.llama3-2-11b-instruct-v1:0",
 }
 
 TOOL_MODELS = {
@@ -94,7 +141,7 @@ TOOL_MODELS = {
 }
 
 
-async def discover_models(provider_id: str, provider_type: str, api_key: str, base_url: str = None):
+async def discover_models(provider_id: str, provider_type: str, api_key: str, base_url: str = None, api_version: str = None):
     models = []
     try:
         if provider_type == "openai":
@@ -192,36 +239,47 @@ async def discover_models(provider_id: str, provider_type: str, api_key: str, ba
                     ))
 
         elif provider_type == "azure":
-            # Azure OpenAI — list deployments
+            # Azure OpenAI — discover models via /openai/models endpoint
             azure_url = (base_url or "").rstrip("/")
-            url = f"{azure_url}/openai/deployments?api-version=2024-02-01"
+            # If URL contains /openai/, extract just the base endpoint
+            if "/openai/" in azure_url:
+                azure_url = azure_url.split("/openai/")[0]
+            # Remove query parameters if present
+            if "?" in azure_url:
+                azure_url = azure_url.split("?")[0]
+            # Convert cognitiveservices.azure.com to openai.azure.com
+            if "cognitiveservices.azure.com" in azure_url:
+                azure_url = azure_url.replace("cognitiveservices.azure.com", "openai.azure.com")
+            # Use 2024-10-21 for model listing (stable GA version that supports /openai/models)
+            models_api_version = "2024-10-21"
+            url = f"{azure_url}/openai/models?api-version={models_api_version}"
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(url, headers={"api-key": api_key})
                 if resp.status_code == 200:
                     data = resp.json()
                     for d in data.get("data", []):
-                        mid = d.get("id", d.get("model", ""))
-                        model_name = d.get("model", mid)
-                        models.append(_build_model(provider_id, mid, model_name))
+                        mid = d.get("id", "")
+                        # Only include chat-capable models
+                        caps = d.get("capabilities", {})
+                        if caps.get("chat_completion") or caps.get("completion") or mid.startswith("gpt"):
+                            models.append(_build_model(provider_id, mid, mid))
                 else:
-                    # Fallback: user can manually test deployments
+                    # Fallback: add common Azure deployment names
                     for mid in ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-35-turbo"]:
                         models.append(_build_model(provider_id, mid, mid))
 
         elif provider_type == "bedrock":
-            # AWS Bedrock — known models (no public listing API without boto3)
-            bedrock_models = [
-                ("anthropic.claude-3-5-sonnet-20241022-v2:0", "Claude 3.5 Sonnet v2", 200000),
-                ("anthropic.claude-3-5-haiku-20241022-v1:0", "Claude 3.5 Haiku", 200000),
-                ("anthropic.claude-3-opus-20240229-v1:0", "Claude 3 Opus", 200000),
-                ("amazon.titan-text-premier-v1:0", "Titan Text Premier", 32000),
-                ("amazon.titan-text-express-v1", "Titan Text Express", 8192),
-                ("meta.llama3-1-70b-instruct-v1:0", "Llama 3.1 70B", 128000),
-                ("meta.llama3-1-8b-instruct-v1:0", "Llama 3.1 8B", 128000),
-                ("mistral.mistral-large-2407-v1:0", "Mistral Large", 128000),
-            ]
-            for mid, name, ctx in bedrock_models:
-                models.append(_build_model(provider_id, mid, name, context_window=ctx))
+            # AWS Bedrock — dynamically discover models using boto3
+            bedrock_models = await _discover_bedrock_models(api_key, base_url)
+            for model_info in bedrock_models:
+                models.append(_build_model(
+                    provider_id,
+                    model_info["model_id"],
+                    model_info["name"],
+                    context_window=model_info.get("context_window", 4096),
+                    input_price=model_info.get("input_price"),
+                    output_price=model_info.get("output_price"),
+                ))
 
         elif provider_type == "sarvam":
             # Sarvam AI — known models
@@ -257,8 +315,270 @@ async def discover_models(provider_id: str, provider_type: str, api_key: str, ba
     return models
 
 
+def _list_bedrock_models_sync(access_key: str, secret_key: str, region: str):
+    """Synchronous function to list Bedrock models using boto3."""
+    import boto3
+
+    client = boto3.client(
+        'bedrock',
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region
+    )
+
+    models = []
+    inference_profile_models = set()  # Track models that have inference profiles
+
+    # FIRST: List inference profiles (required for cross-region inference)
+    # These should be prioritized as many newer models ONLY work via inference profiles
+    try:
+        profiles_response = client.list_inference_profiles()
+        for profile in profiles_response.get('inferenceProfileSummaries', []):
+            profile_id = profile.get('inferenceProfileId', '')
+            profile_name = profile.get('inferenceProfileName', profile_id)
+            profile_type = profile.get('type', 'SYSTEM_DEFINED')
+            status = profile.get('status', 'ACTIVE')
+
+            if status != 'ACTIVE':
+                continue
+
+            # Extract the underlying model from the profile ID
+            # Profile IDs look like: us.anthropic.claude-3-5-sonnet-20241022-v2:0
+            # or eu.meta.llama3-2-90b-instruct-v1:0
+            underlying_model = profile_id
+            if '.' in profile_id:
+                # Remove region prefix (e.g., "us." or "eu.")
+                parts = profile_id.split('.', 1)
+                if len(parts) == 2 and len(parts[0]) <= 3:  # region prefix is short like "us", "eu"
+                    underlying_model = parts[1]
+
+            # Track that this model has an inference profile
+            inference_profile_models.add(underlying_model)
+
+            # Determine context window based on the model
+            context_window = _get_bedrock_context_window(profile_id)
+
+            # Determine if it's a cross-region profile
+            is_cross_region = profile_type == 'SYSTEM_DEFINED' and profile_id.startswith(('us.', 'eu.', 'ap.'))
+
+            # Build display name
+            if is_cross_region:
+                display_name = f"{profile_name} (Cross-Region)"
+            else:
+                display_name = profile_name
+
+            models.append({
+                'model_id': profile_id,  # Use the full inference profile ID
+                'name': display_name,
+                'context_window': context_window,
+                'supports_streaming': True,
+                'is_inference_profile': True,
+                'underlying_model': underlying_model,
+            })
+    except Exception as e:
+        print(f"Error listing Bedrock inference profiles: {e}")
+
+    # SECOND: List foundation models (for on-demand access where supported)
+    try:
+        response = client.list_foundation_models(
+            byOutputModality='TEXT'  # Focus on text generation models
+        )
+
+        for model in response.get('modelSummaries', []):
+            model_id = model.get('modelId', '')
+            model_name = model.get('modelName', model_id)
+            provider_name = model.get('providerName', '')
+            inference_types = model.get('inferenceTypesSupported', [])
+
+            # Skip embedding-only models for chat
+            if 'embed' in model_id.lower() and 'text' not in model_name.lower():
+                continue
+
+            # Skip models that don't support ON_DEMAND if they have an inference profile
+            # (prefer the inference profile for those)
+            supports_on_demand = 'ON_DEMAND' in inference_types
+            has_profile = model_id in inference_profile_models
+
+            if not supports_on_demand and has_profile:
+                # Skip - we already have the inference profile for this model
+                continue
+
+            # Determine capabilities
+            input_modalities = model.get('inputModalities', [])
+            output_modalities = model.get('outputModalities', [])
+            supports_streaming = model.get('responseStreamingSupported', False)
+            context_window = _get_bedrock_context_window(model_id)
+
+            # Build friendly display name
+            display_name = f"{provider_name} {model_name}" if provider_name else model_name
+
+            # If model doesn't support ON_DEMAND and has no profile, mark it clearly
+            if not supports_on_demand and not has_profile:
+                display_name = f"{display_name} (Provisioned Only)"
+
+            models.append({
+                'model_id': model_id,
+                'name': display_name,
+                'context_window': context_window,
+                'supports_streaming': supports_streaming,
+                'input_modalities': input_modalities,
+                'output_modalities': output_modalities,
+                'supports_on_demand': supports_on_demand,
+                'is_inference_profile': False,
+            })
+    except Exception as e:
+        print(f"Error listing Bedrock foundation models: {e}")
+
+    return models
+
+
+def _get_bedrock_context_window(model_id: str) -> int:
+    """Determine context window size based on model ID."""
+    # Normalize to handle cross-region inference profile IDs
+    normalized = _normalize_model_id(model_id)
+    model_lower = normalized.lower()
+
+    # Claude models
+    if 'claude-3' in model_lower or 'claude-opus-4' in model_lower or 'claude-sonnet-4' in model_lower:
+        return 200000
+    elif 'claude' in model_lower:
+        return 100000
+
+    # Llama models
+    if 'llama3-1' in model_lower or 'llama3-2' in model_lower or 'llama-3.1' in model_lower or 'llama-3.2' in model_lower:
+        return 128000
+    elif 'llama3' in model_lower or 'llama-3' in model_lower:
+        return 8192
+    elif 'llama' in model_lower:
+        return 4096
+
+    # Mistral models
+    if 'mistral-large' in model_lower:
+        return 128000
+    elif 'mistral' in model_lower or 'mixtral' in model_lower:
+        return 32000
+
+    # Cohere models
+    if 'command-r' in model_lower:
+        return 128000
+    elif 'command' in model_lower:
+        return 4096
+
+    # AI21 models
+    if 'jamba' in model_lower:
+        return 256000
+
+    # Amazon Titan
+    if 'titan-text-premier' in model_lower:
+        return 32000
+    elif 'titan' in model_lower:
+        return 8192
+
+    return 4096  # Default
+
+
+def _normalize_model_id(model_id: str) -> str:
+    """Remove region prefixes from cross-region inference profile IDs."""
+    # Cross-region inference profiles have format: us.anthropic.claude-3-5-sonnet...
+    # or eu.meta.llama3-2-90b... etc.
+    if '.' in model_id:
+        parts = model_id.split('.', 1)
+        # Check if first part is a region prefix (2-3 chars like 'us', 'eu', 'ap')
+        if len(parts) == 2 and len(parts[0]) <= 3 and parts[0].isalpha():
+            return parts[1]
+    return model_id
+
+
+async def _discover_bedrock_models(api_key: str, base_url: str) -> list:
+    """Dynamically discover AWS Bedrock models using boto3."""
+
+    # Parse credentials: api_key should be "access_key:secret_key"
+    if not api_key or ":" not in api_key:
+        print("Bedrock: Invalid API key format. Expected 'access_key:secret_key'")
+        return _get_fallback_bedrock_models()
+
+    access_key, secret_key = api_key.split(":", 1)
+
+    # Get region from base_url (e.g., "us-east-1")
+    region = (base_url or "us-east-1").strip("/").replace("https://", "").replace("http://", "")
+    if not region:
+        region = "us-east-1"
+
+    try:
+        # Run boto3 call in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        models = await loop.run_in_executor(
+            _executor,
+            _list_bedrock_models_sync,
+            access_key,
+            secret_key,
+            region
+        )
+
+        if models:
+            print(f"Bedrock: Discovered {len(models)} models dynamically")
+            return models
+        else:
+            print("Bedrock: No models found, using fallback list")
+            return _get_fallback_bedrock_models()
+
+    except Exception as e:
+        print(f"Bedrock: Error discovering models dynamically: {e}")
+        return _get_fallback_bedrock_models()
+
+
+def _get_fallback_bedrock_models() -> list:
+    """Return fallback list of common Bedrock models when dynamic discovery fails.
+
+    Includes both:
+    - Cross-region inference profile IDs (us.* prefix) for newer models
+    - Direct model IDs for models that support on-demand access
+    """
+    return [
+        # Cross-region inference profiles (required for newer models like Claude Opus 4)
+        {"model_id": "us.anthropic.claude-opus-4-0-v1:0", "name": "Claude Opus 4 (Cross-Region)", "context_window": 200000},
+        {"model_id": "us.anthropic.claude-sonnet-4-0-v1:0", "name": "Claude Sonnet 4 (Cross-Region)", "context_window": 200000},
+        {"model_id": "us.anthropic.claude-3-7-sonnet-20250219-v1:0", "name": "Claude 3.7 Sonnet (Cross-Region)", "context_window": 200000},
+        {"model_id": "us.anthropic.claude-3-5-sonnet-20241022-v2:0", "name": "Claude 3.5 Sonnet v2 (Cross-Region)", "context_window": 200000},
+        {"model_id": "us.anthropic.claude-3-5-haiku-20241022-v1:0", "name": "Claude 3.5 Haiku (Cross-Region)", "context_window": 200000},
+        {"model_id": "us.anthropic.claude-3-opus-20240229-v1:0", "name": "Claude 3 Opus (Cross-Region)", "context_window": 200000},
+        {"model_id": "us.meta.llama3-2-90b-instruct-v1:0", "name": "Llama 3.2 90B (Cross-Region)", "context_window": 128000},
+        {"model_id": "us.meta.llama3-2-11b-instruct-v1:0", "name": "Llama 3.2 11B (Cross-Region)", "context_window": 128000},
+        {"model_id": "us.meta.llama3-1-405b-instruct-v1:0", "name": "Llama 3.1 405B (Cross-Region)", "context_window": 128000},
+
+        # Direct model IDs (for on-demand access)
+        {"model_id": "anthropic.claude-3-5-sonnet-20241022-v2:0", "name": "Claude 3.5 Sonnet v2", "context_window": 200000},
+        {"model_id": "anthropic.claude-3-5-haiku-20241022-v1:0", "name": "Claude 3.5 Haiku", "context_window": 200000},
+        {"model_id": "anthropic.claude-3-sonnet-20240229-v1:0", "name": "Claude 3 Sonnet", "context_window": 200000},
+        {"model_id": "anthropic.claude-3-haiku-20240307-v1:0", "name": "Claude 3 Haiku", "context_window": 200000},
+        {"model_id": "meta.llama3-1-70b-instruct-v1:0", "name": "Llama 3.1 70B", "context_window": 128000},
+        {"model_id": "meta.llama3-1-8b-instruct-v1:0", "name": "Llama 3.1 8B", "context_window": 128000},
+        {"model_id": "mistral.mistral-large-2407-v1:0", "name": "Mistral Large", "context_window": 128000},
+        {"model_id": "amazon.titan-text-premier-v1:0", "name": "Titan Text Premier", "context_window": 32000},
+        {"model_id": "amazon.titan-text-express-v1", "name": "Titan Text Express", "context_window": 8192},
+        {"model_id": "cohere.command-r-plus-v1:0", "name": "Command R+", "context_window": 128000},
+        {"model_id": "cohere.command-r-v1:0", "name": "Command R", "context_window": 128000},
+        {"model_id": "ai21.jamba-1-5-large-v1:0", "name": "Jamba 1.5 Large", "context_window": 256000},
+    ]
+
+
 def _build_model(provider_id, model_id, name, context_window=None, input_price=None, output_price=None):
     pricing = MODEL_PRICING.get(model_id, {})
+
+    # Dynamic tool support detection
+    supports_tools = 0
+    if model_id in TOOL_MODELS:
+        supports_tools = 1
+    elif _model_supports_tools(model_id):
+        supports_tools = 1
+
+    # Dynamic vision support detection
+    supports_vision = 0
+    if model_id in VISION_MODELS:
+        supports_vision = 1
+    elif _model_supports_vision(model_id):
+        supports_vision = 1
+
     return {
         "id": str(uuid.uuid4()),
         "provider_id": provider_id,
@@ -267,14 +587,78 @@ def _build_model(provider_id, model_id, name, context_window=None, input_price=N
         "context_window": context_window or MODEL_CONTEXT_WINDOWS.get(model_id, 4096),
         "input_price_per_1k": input_price if input_price is not None else pricing.get("input", 0.0),
         "output_price_per_1k": output_price if output_price is not None else pricing.get("output", 0.0),
-        "supports_tools": 1 if model_id in TOOL_MODELS else 0,
-        "supports_vision": 1 if model_id in VISION_MODELS else 0,
+        "supports_tools": supports_tools,
+        "supports_vision": supports_vision,
         "supports_streaming": 1,
         "metadata": {},
     }
 
 
-async def validate_api_key(provider_type: str, api_key: str, base_url: str = None) -> bool:
+def _model_supports_tools(model_id: str) -> bool:
+    """Dynamically detect if a model supports tool/function calling."""
+    # Normalize to handle cross-region inference profile IDs
+    normalized = _normalize_model_id(model_id)
+    model_lower = normalized.lower()
+
+    # Claude 3+, Claude 4 models support tools
+    if 'claude-3' in model_lower or 'claude-opus-4' in model_lower or 'claude-sonnet-4' in model_lower:
+        return True
+
+    # GPT-4 and GPT-3.5-turbo support tools
+    if 'gpt-4' in model_lower or 'gpt-3.5-turbo' in model_lower:
+        return True
+
+    # Llama 3.1+ models support tools
+    if 'llama3-1' in model_lower or 'llama3-2' in model_lower or 'llama-3.1' in model_lower:
+        return True
+
+    # Mistral large models support tools
+    if 'mistral-large' in model_lower or 'mistral.mistral-large' in model_lower:
+        return True
+
+    # Cohere Command R models support tools
+    if 'command-r' in model_lower:
+        return True
+
+    # Gemini models support tools
+    if 'gemini' in model_lower:
+        return True
+
+    # AI21 Jamba models support tools
+    if 'jamba' in model_lower:
+        return True
+
+    return False
+
+
+def _model_supports_vision(model_id: str) -> bool:
+    """Dynamically detect if a model supports vision/image input."""
+    # Normalize to handle cross-region inference profile IDs
+    normalized = _normalize_model_id(model_id)
+    model_lower = normalized.lower()
+
+    # Claude 3+, Claude 4 models support vision
+    if 'claude-3' in model_lower or 'claude-opus-4' in model_lower or 'claude-sonnet-4' in model_lower:
+        return True
+
+    # GPT-4 vision models
+    if 'gpt-4o' in model_lower or 'gpt-4-turbo' in model_lower or 'gpt-4-vision' in model_lower:
+        return True
+
+    # Llama 3.2 vision models (11B and 90B)
+    if 'llama3-2-90b' in model_lower or 'llama3-2-11b' in model_lower:
+        return True
+    if 'llama-3.2-90b' in model_lower or 'llama-3.2-11b' in model_lower:
+        return True
+
+    # Gemini models support vision
+    if 'gemini' in model_lower and 'nano' not in model_lower:
+        return True
+
+    return False
+
+
+async def validate_api_key(provider_type: str, api_key: str, base_url: str = None, api_version: str = None) -> bool:
     try:
         if provider_type == "openai":
             url = (base_url or "https://api.openai.com") + "/v1/models"
@@ -312,14 +696,52 @@ async def validate_api_key(provider_type: str, api_key: str, base_url: str = Non
                 resp = await client.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {api_key}"})
                 return resp.status_code == 200
         elif provider_type == "azure":
+            # Extract clean Azure endpoint from potentially full URL
             azure_url = (base_url or "").rstrip("/")
-            url = f"{azure_url}/openai/deployments?api-version=2024-02-01"
+            # If URL contains /openai/, extract just the base endpoint
+            if "/openai/" in azure_url:
+                azure_url = azure_url.split("/openai/")[0]
+            # Remove query parameters if present
+            if "?" in azure_url:
+                azure_url = azure_url.split("?")[0]
+            # Convert cognitiveservices.azure.com to openai.azure.com
+            if "cognitiveservices.azure.com" in azure_url:
+                azure_url = azure_url.replace("cognitiveservices.azure.com", "openai.azure.com")
+            # Use 2024-10-21 for model listing (stable GA version that supports /openai/models)
+            models_api_version = "2024-10-21"
+            url = f"{azure_url}/openai/models?api-version={models_api_version}"
+            print(f"[Azure Validation] URL: {url}")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(url, headers={"api-key": api_key})
+                print(f"[Azure Validation] Response status: {resp.status_code}")
+                if resp.status_code != 200:
+                    print(f"[Azure Validation] Response body: {resp.text[:500]}")
                 return resp.status_code == 200
         elif provider_type == "bedrock":
-            # Bedrock uses AWS credentials — litellm handles auth, so we accept the key format
-            return bool(api_key and ":" in api_key)  # expects access_key:secret_key format
+            # Bedrock uses AWS credentials — validate by calling boto3
+            if not api_key or ":" not in api_key:
+                return False
+            access_key, secret_key = api_key.split(":", 1)
+            region = (base_url or "us-east-1").strip("/").replace("https://", "").replace("http://", "") or "us-east-1"
+
+            def _validate_bedrock_sync():
+                import boto3
+                client = boto3.client(
+                    'bedrock',
+                    aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key,
+                    region_name=region
+                )
+                # Try to list models to validate credentials
+                client.list_foundation_models(maxResults=1)
+                return True
+
+            try:
+                loop = asyncio.get_event_loop()
+                return await loop.run_in_executor(_executor, _validate_bedrock_sync)
+            except Exception as e:
+                print(f"[Bedrock Validation] Error: {e}")
+                return False
         elif provider_type == "sarvam":
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(

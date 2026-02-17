@@ -36,11 +36,20 @@ export default function ToolsPage() {
     async function handleSave(e) {
         e.preventDefault();
         try {
+            // Parse parameters_schema from string to object
+            let parsedSchema = {};
+            try {
+                parsedSchema = JSON.parse(form.parameters_schema || '{}');
+            } catch (parseErr) {
+                alert('Invalid JSON in Parameters Schema: ' + parseErr.message);
+                return;
+            }
+
             const data = {
                 name: form.name,
                 description: form.description,
-                tool_type: form.tool_type,
-                parameters_schema: form.parameters_schema,
+                category: 'custom',
+                parameters_schema: parsedSchema,
                 code: form.code
             };
             if (editingTool) {
@@ -52,7 +61,7 @@ export default function ToolsPage() {
             setEditingTool(null);
             setForm({ name: '', description: '', tool_type: 'custom', parameters_schema: '{}', code: '' });
             loadTools();
-        } catch (e) { alert(e.message); }
+        } catch (e) { alert(e.message || String(e)); }
     }
 
     async function handleDelete(id) {
@@ -78,11 +87,18 @@ export default function ToolsPage() {
 
     function openEdit(tool) {
         setEditingTool(tool);
+        // Convert parameters_schema to string if it's an object
+        let schemaStr = '{}';
+        if (tool.parameters_schema) {
+            schemaStr = typeof tool.parameters_schema === 'string'
+                ? tool.parameters_schema
+                : JSON.stringify(tool.parameters_schema, null, 2);
+        }
         setForm({
             name: tool.name,
             description: tool.description || '',
-            tool_type: tool.tool_type,
-            parameters_schema: tool.parameters_schema || '{}',
+            tool_type: tool.type || 'custom',
+            parameters_schema: schemaStr,
             code: tool.code || ''
         });
         setShowModal(true);

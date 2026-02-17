@@ -67,6 +67,7 @@ async def init_db():
                 type TEXT NOT NULL,
                 api_key_encrypted TEXT,
                 base_url TEXT,
+                api_version TEXT,
                 status TEXT DEFAULT 'active',
                 config TEXT DEFAULT '{}',
                 created_at TEXT NOT NULL,
@@ -276,6 +277,8 @@ async def _run_migrations(db):
         # Secrets scope migration
         ("secrets", "scope_type", "TEXT"),
         ("secrets", "scope_id", "TEXT"),
+        # Provider api_version column
+        ("providers", "api_version", "TEXT"),
     ]
 
     for table, column, col_type in migrations:

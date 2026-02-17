@@ -16,6 +16,7 @@ async def stream_chat_completion(
     messages: list,
     api_key: str,
     base_url: str = None,
+    api_version: str = None,
     tools: list = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
@@ -28,13 +29,31 @@ async def stream_chat_completion(
     kwargs = {
         "model": litellm_model,
         "messages": messages,
-        "api_key": api_key,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": True,
     }
-    if base_url:
-        kwargs["api_base"] = base_url
+
+    # Handle provider-specific authentication
+    if provider_type == "bedrock":
+        # For Bedrock, api_key is expected as "access_key:secret_key"
+        # and base_url contains the region name (e.g., "us-east-1")
+        if api_key and ":" in api_key:
+            access_key, secret_key = api_key.split(":", 1)
+            kwargs["aws_access_key_id"] = access_key
+            kwargs["aws_secret_access_key"] = secret_key
+        if base_url:
+            # base_url for Bedrock should be the region name
+            region = base_url.strip("/").replace("https://", "").replace("http://", "")
+            kwargs["aws_region_name"] = region
+    else:
+        # Standard API key authentication for other providers
+        kwargs["api_key"] = api_key
+        if base_url:
+            kwargs["api_base"] = base_url
+
+    if provider_type == "azure":
+        kwargs["api_version"] = api_version or "2024-06-01"
     if tools:
         kwargs["tools"] = tools
 
@@ -137,6 +156,7 @@ async def non_stream_chat_completion(
     messages: list,
     api_key: str,
     base_url: str = None,
+    api_version: str = None,
     tools: list = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
@@ -149,13 +169,31 @@ async def non_stream_chat_completion(
     kwargs = {
         "model": litellm_model,
         "messages": messages,
-        "api_key": api_key,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": False,
     }
-    if base_url:
-        kwargs["api_base"] = base_url
+
+    # Handle provider-specific authentication
+    if provider_type == "bedrock":
+        # For Bedrock, api_key is expected as "access_key:secret_key"
+        # and base_url contains the region name (e.g., "us-east-1")
+        if api_key and ":" in api_key:
+            access_key, secret_key = api_key.split(":", 1)
+            kwargs["aws_access_key_id"] = access_key
+            kwargs["aws_secret_access_key"] = secret_key
+        if base_url:
+            # base_url for Bedrock should be the region name
+            region = base_url.strip("/").replace("https://", "").replace("http://", "")
+            kwargs["aws_region_name"] = region
+    else:
+        # Standard API key authentication for other providers
+        kwargs["api_key"] = api_key
+        if base_url:
+            kwargs["api_base"] = base_url
+
+    if provider_type == "azure":
+        kwargs["api_version"] = api_version or "2024-06-01"
     if tools:
         kwargs["tools"] = tools
 

@@ -22,7 +22,7 @@ export default function ProvidersPage() {
     const [showModal, setShowModal] = useState(false);
     const [expandedProvider, setExpandedProvider] = useState(null);
     const [models, setModels] = useState({});
-    const [form, setForm] = useState({ name: '', type: 'openai', api_key: '', base_url: '' });
+    const [form, setForm] = useState({ name: '', type: 'openai', api_key: '', base_url: '', api_version: '' });
     const [formError, setFormError] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
@@ -45,9 +45,10 @@ export default function ProvidersPage() {
         try {
             const data = { name: form.name, type: form.type, api_key: form.api_key };
             if (form.base_url) data.base_url = form.base_url;
+            if (form.api_version) data.api_version = form.api_version;
             await api.createProvider(data);
             setShowModal(false);
-            setForm({ name: '', type: 'openai', api_key: '', base_url: '' });
+            setForm({ name: '', type: 'openai', api_key: '', base_url: '', api_version: '' });
             loadProviders();
         } catch (e) {
             setFormError(e.message);
@@ -232,6 +233,23 @@ export default function ProvidersPage() {
                                         }
                                         value={form.base_url} onChange={e => setForm({ ...form, base_url: e.target.value })}
                                         required={form.type === 'azure'} />
+                                    {form.type === 'azure' && (
+                                        <small style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4, display: 'block' }}>
+                                            Use the endpoint URL from Azure portal (e.g., https://xxx.openai.azure.com). Don't include /openai/ paths.
+                                        </small>
+                                    )}
+                                </div>
+                            )}
+                            {form.type === 'azure' && (
+                                <div className="form-group">
+                                    <label className="form-label">API Version (optional)</label>
+                                    <input className="form-input"
+                                        placeholder="2024-06-01"
+                                        value={form.api_version}
+                                        onChange={e => setForm({ ...form, api_version: e.target.value })} />
+                                    <small style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4, display: 'block' }}>
+                                        Default: 2024-06-01. Change if your Azure deployment requires a different version.
+                                    </small>
                                 </div>
                             )}
                             {formError && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{formError}</p>}

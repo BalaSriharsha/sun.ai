@@ -12,6 +12,23 @@ import asyncio
 
 router = APIRouter()
 
+
+def _clean_azure_base_url(base_url: str) -> str:
+    """Extract clean Azure endpoint from potentially full URL."""
+    if not base_url:
+        return base_url
+    azure_url = base_url.rstrip("/")
+    # If URL contains /openai/, extract just the base endpoint
+    if "/openai/" in azure_url:
+        azure_url = azure_url.split("/openai/")[0]
+    # Remove query parameters if present
+    if "?" in azure_url:
+        azure_url = azure_url.split("?")[0]
+    # Convert cognitiveservices.azure.com to openai.azure.com
+    if "cognitiveservices.azure.com" in azure_url:
+        azure_url = azure_url.replace("cognitiveservices.azure.com", "openai.azure.com")
+    return azure_url
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -107,7 +124,8 @@ async def chat_completions(request: ChatRequest):
                 model_id=request.model_id,
                 messages=messages,
                 api_key=provider["api_key_encrypted"],
-                base_url=provider.get("base_url"),
+                base_url=_clean_azure_base_url(provider.get("base_url")),
+                api_version=provider.get("api_version"),
                 tools=tool_schemas,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
@@ -143,7 +161,8 @@ async def chat_completions(request: ChatRequest):
             model_id=request.model_id,
             messages=messages,
             api_key=provider["api_key_encrypted"],
-            base_url=provider.get("base_url"),
+            base_url=_clean_azure_base_url(provider.get("base_url")),
+            api_version=provider.get("api_version"),
             tools=tool_schemas,
             temperature=request.temperature,
             max_tokens=request.max_tokens,

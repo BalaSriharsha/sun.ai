@@ -233,7 +233,16 @@ async def seed_builtin_tools():
         await db.close()
 
 
-async def execute_tool(tool_name: str, parameters: dict, tool_code: str = None) -> dict:
+async def execute_tool(tool_name: str, parameters: dict, tool_code: str = None, context: dict = None) -> dict:
+    """
+    Execute a tool by name with given parameters.
+
+    Args:
+        tool_name: Name of the tool to execute
+        parameters: Parameters to pass to the tool
+        tool_code: For custom tools, the Python code to execute
+        context: Scope context for secrets access (workspace_id, environment_id, org_id)
+    """
     try:
         if tool_name == "web_search":
             return await _exec_web_search(parameters)
@@ -266,7 +275,7 @@ async def execute_tool(tool_name: str, parameters: dict, tool_code: str = None) 
         elif tool_name == "hash_generate":
             return await _exec_hash(parameters)
         elif tool_code:
-            return await _exec_custom_tool(tool_code, parameters)
+            return await _exec_custom_tool(tool_code, parameters, context)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
     except Exception as e:
@@ -498,9 +507,95 @@ async def _exec_hash(params: dict) -> dict:
         return {"error": f"Hash error: {str(e)}"}
 
 
-async def _exec_custom_tool(code: str, parameters: dict) -> dict:
+async def _exec_custom_tool(code: str, parameters: dict, context: dict = None) -> dict:
+    """
+    Execute custom tool code with built-in get_secret() function.
+
+    context should contain:
+        - workspace_id: Current workspace ID (optional)
+        - environment_id: Current environment ID (optional)
+        - org_id: Current organization ID (optional)
+    """
+    import os as _os
+    context = context or {}
+    # Use defaults if context values are empty
+    workspace_id = context.get("workspace_id") or "default-workspace"
+    environment_id = context.get("environment_id") or "default-env"
+    org_id = context.get("org_id") or "default-org"
+
+    # Path to the database file
+    db_path = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "agentic_platform.db")
+
+    # Build the get_secret helper code that will be injected into the subprocess
+    get_secret_code = f'''
+def get_secret(secret_name):
+    """
+    Get a secret value by name. Searches in order:
+    1. Workspace scope (highest priority)
+    2. Environment scope
+    3. Organization scope (lowest priority)
+    Raises ValueError if secret not found or no access.
+    """
+    import sqlite3
+
+    db_path = "{db_path}"
+    workspace_id = "{workspace_id}"
+    environment_id = "{environment_id}"
+    org_id = "{org_id}"
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # If we have a workspace_id, resolve its env_id and org_id for inheritance
+    if workspace_id:
+        cursor.execute(
+            "SELECT org_id, env_id FROM workspaces WHERE id = ?",
+            (workspace_id,)
+        )
+        ws_row = cursor.fetchone()
+        if ws_row:
+            org_id = ws_row[0] or org_id
+            environment_id = ws_row[1] or environment_id
+
+    # Try scopes in priority order: workspace -> environment -> organization
+    scopes_to_try = []
+    if workspace_id:
+        scopes_to_try.append(("workspace", workspace_id))
+    if environment_id:
+        scopes_to_try.append(("env", environment_id))
+    if org_id:
+        scopes_to_try.append(("org", org_id))
+
+    for scope_type, scope_id in scopes_to_try:
+        cursor.execute(
+            "SELECT value_encrypted FROM secrets WHERE name = ? AND scope_type = ? AND scope_id = ?",
+            (secret_name, scope_type, scope_id)
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.close()
+            return row[0]
+
+    conn.close()
+
+    # Build helpful error message about which scopes were checked
+    checked_scopes = []
+    if workspace_id:
+        checked_scopes.append(f"workspace '{{workspace_id}}'")
+    if environment_id:
+        checked_scopes.append(f"environment '{{environment_id}}'")
+    if org_id:
+        checked_scopes.append(f"organization '{{org_id}}'")
+
+    if checked_scopes:
+        raise ValueError(f"Secret '{{secret_name}}' not found in: {{', '.join(checked_scopes)}}")
+    else:
+        raise ValueError(f"Secret '{{secret_name}}' not found - no scope context available")
+'''
+
     full_code = f"""
 import json, sys
+{get_secret_code}
 params = json.loads('''{json.dumps(parameters)}''')
 {code}
 if 'result' in dir():

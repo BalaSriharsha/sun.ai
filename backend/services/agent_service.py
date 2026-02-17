@@ -9,6 +9,20 @@ from services.observability_service import log_llm_call
 from services.mcp_service import execute_mcp_tool
 
 
+def _clean_azure_base_url(provider_type: str, base_url: str) -> str:
+    """Clean Azure base URL: strip paths, query params, convert cognitiveservices domain."""
+    if provider_type != "azure" or not base_url:
+        return base_url
+    url = base_url.rstrip("/")
+    if "/openai/" in url:
+        url = url.split("/openai/")[0]
+    if "?" in url:
+        url = url.split("?")[0]
+    if "cognitiveservices.azure.com" in url:
+        url = url.replace("cognitiveservices.azure.com", "openai.azure.com")
+    return url
+
+
 async def get_agent_config(agent_id: str):
     """Load agent configuration from database."""
     db = await get_db()
@@ -20,6 +34,23 @@ async def get_agent_config(agent_id: str):
         agent = dict(row)
         agent["tools"] = json.loads(agent.get("tools", "[]"))
         agent["mcp_servers"] = json.loads(agent.get("mcp_servers", "[]"))
+
+        # Resolve workspace scope context for secrets access
+        workspace_id = agent.get("workspace_id") or "default-workspace"
+        scope_context = {
+            "workspace_id": workspace_id,
+            "environment_id": "default-env",
+            "org_id": "default-org",
+        }
+        # Try to resolve actual env and org from workspace
+        cursor = await db.execute(
+            "SELECT org_id, env_id FROM workspaces WHERE id = ?", (workspace_id,)
+        )
+        ws_row = await cursor.fetchone()
+        if ws_row:
+            scope_context["org_id"] = ws_row["org_id"] or "default-org"
+            scope_context["environment_id"] = ws_row["env_id"] or "default-env"
+        agent["scope_context"] = scope_context
 
         # Load provider info
         if agent.get("provider_id"):
@@ -120,7 +151,8 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
                 model_id=agent["model_id"],
                 messages=messages,
                 api_key=provider["api_key_encrypted"],
-                base_url=provider.get("base_url"),
+                base_url=_clean_azure_base_url(provider["type"], provider.get("base_url")),
+                api_version=provider.get("api_version"),
                 tools=agent["tool_schemas"] if agent["tool_schemas"] else None,
                 temperature=agent.get("temperature", 0.7),
                 max_tokens=agent.get("max_tokens", 4096),
@@ -140,7 +172,8 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
                         model_id=agent["model_id"],
                         messages=messages,
                         api_key=provider["api_key_encrypted"],
-                        base_url=provider.get("base_url"),
+                        base_url=_clean_azure_base_url(provider["type"], provider.get("base_url")),
+                        api_version=provider.get("api_version"),
                         tools=None,
                         temperature=agent.get("temperature", 0.7),
                         max_tokens=agent.get("max_tokens", 4096),
@@ -188,7 +221,8 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
                     else:
                         tool_data = agent["tool_map"].get(fn_name)
                         code = tool_data.get("code") if tool_data else None
-                        tool_result = await execute_tool(fn_name, fn_args, code)
+                        # Pass scope context for get_secret() access in custom tools
+                        tool_result = await execute_tool(fn_name, fn_args, code, agent.get("scope_context"))
                     tool_result_str = json.dumps(tool_result) if not isinstance(tool_result, str) else tool_result
                 except Exception as e:
                     tool_result_str = json.dumps({"error": str(e)})
@@ -249,7 +283,8 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
                 model_id=agent["model_id"],
                 messages=messages,
                 api_key=provider["api_key_encrypted"],
-                base_url=provider.get("base_url"),
+                base_url=_clean_azure_base_url(provider["type"], provider.get("base_url")),
+                api_version=provider.get("api_version"),
                 tools=agent["tool_schemas"] if agent["tool_schemas"] else None,
                 temperature=agent.get("temperature", 0.7),
                 max_tokens=agent.get("max_tokens", 4096),
@@ -268,7 +303,8 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
                         model_id=agent["model_id"],
                         messages=messages,
                         api_key=provider["api_key_encrypted"],
-                        base_url=provider.get("base_url"),
+                        base_url=_clean_azure_base_url(provider["type"], provider.get("base_url")),
+                        api_version=provider.get("api_version"),
                         tools=None,
                         temperature=agent.get("temperature", 0.7),
                         max_tokens=agent.get("max_tokens", 4096),
@@ -308,7 +344,8 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
                     else:
                         tool_data = agent["tool_map"].get(fn_name)
                         code = tool_data.get("code") if tool_data else None
-                        tool_result = await execute_tool(fn_name, fn_args, code)
+                        # Pass scope context for get_secret() access in custom tools
+                        tool_result = await execute_tool(fn_name, fn_args, code, agent.get("scope_context"))
                     tool_result_str = json.dumps(tool_result) if not isinstance(tool_result, str) else tool_result
                 except Exception as e:
                     tool_result_str = json.dumps({"error": str(e)})

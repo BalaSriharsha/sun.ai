@@ -11,6 +11,19 @@ import json
 
 router = APIRouter()
 
+
+def _clean_azure_base_url(provider_type: str, base_url: str) -> str:
+    if provider_type != "azure" or not base_url:
+        return base_url
+    url = base_url.rstrip("/")
+    if "/openai/" in url:
+        url = url.split("/openai/")[0]
+    if "?" in url:
+        url = url.split("?")[0]
+    if "cognitiveservices.azure.com" in url:
+        url = url.replace("cognitiveservices.azure.com", "openai.azure.com")
+    return url
+
 class RunbookCreate(BaseModel):
     name: str
     description: Optional[str] = ""
@@ -206,7 +219,8 @@ async def execute_runbook(runbook_id: str, exec_req: RunbookExecute):
                 model_id=model_id,
                 messages=current_messages,
                 api_key=provider["api_key_encrypted"],
-                base_url=provider.get("base_url"),
+                base_url=_clean_azure_base_url(provider["type"], provider.get("base_url")),
+                api_version=provider.get("api_version"),
                 tools=tool_schemas if tool_schemas else None,
                 provider_id=provider["id"],
                 provider_name=provider["name"],
