@@ -24,6 +24,8 @@ async def stream_chat_completion(
     provider_name: str = None,
     conversation_id: str = None,
     source: str = "chat",
+    org_id: str = None,
+    workspace_id: str = None,
 ):
     litellm_model = get_litellm_model_name(provider_type, model_id)
     kwargs = {
@@ -116,6 +118,8 @@ async def stream_chat_completion(
             status="success",
             source=source,
             conversation_id=conversation_id,
+            org_id=org_id,
+            workspace_id=workspace_id,
         )
 
         yield {
@@ -146,6 +150,8 @@ async def stream_chat_completion(
             error=str(e),
             source=source,
             conversation_id=conversation_id,
+            org_id=org_id,
+            workspace_id=workspace_id,
         )
         yield {"type": "error", "error": str(e)}
 
@@ -164,6 +170,8 @@ async def non_stream_chat_completion(
     provider_name: str = None,
     conversation_id: str = None,
     source: str = "chat",
+    org_id: str = None,
+    workspace_id: str = None,
 ):
     litellm_model = get_litellm_model_name(provider_type, model_id)
     kwargs = {
@@ -231,6 +239,8 @@ async def non_stream_chat_completion(
             status="success",
             source=source,
             conversation_id=conversation_id,
+            org_id=org_id,
+            workspace_id=workspace_id,
         )
 
         tool_calls = None
@@ -277,6 +287,8 @@ async def non_stream_chat_completion(
             error=str(e),
             source=source,
             conversation_id=conversation_id,
+            org_id=org_id,
+            workspace_id=workspace_id,
         )
         raise
 

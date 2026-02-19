@@ -1,0 +1,7 @@
+  [
+    {"agent_id": "1cbe81fe-47a6-4ab7-b47f-ee1c8c313839", "query": "List all tables"},
+    {"agent_id": "1cbe81fe-47a6-4ab7-b47f-ee1c8c313839", "query": "Describe the migrations table"},
+    {"agent_id": "1cbe81fe-47a6-4ab7-b47f-ee1c8c313839", "query": "Describe the comments table"},
+    {"agent_id": "1cbe81fe-47a6-4ab7-b47f-ee1c8c313839", "query": "Describe the deliverables table"},
+    {"agent_id": "1cbe81fe-47a6-4ab7-b47f-ee1c8c313839", "query": "Describe the team_personas table"}
+  ]

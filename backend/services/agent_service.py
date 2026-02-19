@@ -142,6 +142,8 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
     iteration = 0
     max_iter = agent.get("max_iterations", 10)
 
+    scope_ctx = agent.get("scope_context", {})
+
     while iteration < max_iter:
         iteration += 1
 
@@ -160,6 +162,8 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
                 provider_name=provider["name"],
                 conversation_id=conversation_id,
                 source="agent",
+                org_id=scope_ctx.get("org_id"),
+                workspace_id=scope_ctx.get("workspace_id"),
             )
         except Exception as llm_err:
             err_str = str(llm_err)
@@ -181,6 +185,8 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
                         provider_name=provider["name"],
                         conversation_id=conversation_id,
                         source="agent",
+                        org_id=scope_ctx.get("org_id"),
+                        workspace_id=scope_ctx.get("workspace_id"),
                     )
                 except Exception as retry_err:
                     return {"error": f"LLM error: {str(retry_err)}", "steps": steps}
@@ -214,15 +220,19 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
                 steps.append(step)
 
                 # Execute the tool — route to MCP or builtin
+                scope_ctx = agent.get("scope_context", {})
                 try:
                     if fn_name in agent.get("mcp_tool_ids", set()):
                         mcp_info = agent["mcp_server_map"][fn_name]
-                        tool_result = await execute_mcp_tool(mcp_info["server_id"], mcp_info["tool_name"], fn_args)
+                        tool_result = await execute_mcp_tool(
+                            mcp_info["server_id"], mcp_info["tool_name"], fn_args,
+                            org_id=scope_ctx.get("org_id"),
+                        )
                     else:
                         tool_data = agent["tool_map"].get(fn_name)
                         code = tool_data.get("code") if tool_data else None
                         # Pass scope context for get_secret() access in custom tools
-                        tool_result = await execute_tool(fn_name, fn_args, code, agent.get("scope_context"))
+                        tool_result = await execute_tool(fn_name, fn_args, code, scope_ctx)
                     tool_result_str = json.dumps(tool_result) if not isinstance(tool_result, str) else tool_result
                 except Exception as e:
                     tool_result_str = json.dumps({"error": str(e)})
@@ -272,6 +282,7 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
 
     iteration = 0
     max_iter = agent.get("max_iterations", 10)
+    scope_ctx = agent.get("scope_context", {})
 
     while iteration < max_iter:
         iteration += 1
@@ -292,6 +303,8 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
                 provider_name=provider["name"],
                 conversation_id=conversation_id,
                 source="agent",
+                org_id=scope_ctx.get("org_id"),
+                workspace_id=scope_ctx.get("workspace_id"),
             )
         except Exception as llm_err:
             err_str = str(llm_err)
@@ -312,6 +325,8 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
                         provider_name=provider["name"],
                         conversation_id=conversation_id,
                         source="agent",
+                        org_id=scope_ctx.get("org_id"),
+                        workspace_id=scope_ctx.get("workspace_id"),
                     )
                 except Exception as retry_err:
                     yield {"type": "error", "error": f"LLM error: {str(retry_err)}"}
@@ -337,15 +352,18 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
 
                 yield {"type": "tool_call", "tool": fn_name, "arguments": fn_args, "iteration": iteration}
 
+                scope_ctx = agent.get("scope_context", {})
                 try:
                     if fn_name in agent.get("mcp_tool_ids", set()):
                         mcp_info = agent["mcp_server_map"][fn_name]
-                        tool_result = await execute_mcp_tool(mcp_info["server_id"], mcp_info["tool_name"], fn_args)
+                        tool_result = await execute_mcp_tool(
+                            mcp_info["server_id"], mcp_info["tool_name"], fn_args,
+                            org_id=scope_ctx.get("org_id"),
+                        )
                     else:
                         tool_data = agent["tool_map"].get(fn_name)
                         code = tool_data.get("code") if tool_data else None
-                        # Pass scope context for get_secret() access in custom tools
-                        tool_result = await execute_tool(fn_name, fn_args, code, agent.get("scope_context"))
+                        tool_result = await execute_tool(fn_name, fn_args, code, scope_ctx)
                     tool_result_str = json.dumps(tool_result) if not isinstance(tool_result, str) else tool_result
                 except Exception as e:
                     tool_result_str = json.dumps({"error": str(e)})

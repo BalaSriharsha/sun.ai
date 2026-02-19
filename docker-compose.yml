@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  sunnyai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sunnyai
+    ports:
+      - "3000:3000"   # Frontend
+      - "8000:8000"   # Backend API
+    volumes:
+      # Persist SQLite database
+      - sunnyai-data:/app/backend
+    environment:
+      # Add your API keys here or use .env file
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - AZURE_API_KEY=${AZURE_API_KEY:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      # GitHub for MCP
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      # Frontend API URL
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  sunnyai-data:
+    driver: local

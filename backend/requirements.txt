@@ -10,3 +10,4 @@ duckduckgo-search==6.2.0
 beautifulsoup4==4.12.3
 mcp==1.1.0
 boto3>=1.34.0
+docker>=7.0.0

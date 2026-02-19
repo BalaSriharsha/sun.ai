@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from database import get_db
-from services.mcp_service import start_mcp_server, stop_mcp_server, get_server_status, execute_mcp_tool
+from services.mcp_service import start_mcp_server, stop_mcp_server, get_server_status, execute_mcp_tool, discover_mcp_tools
 import uuid
 import json
 
@@ -125,19 +125,46 @@ async def update_mcp_server(server_id: str, update: MCPServerUpdate):
             raise HTTPException(status_code=404, detail="MCP server not found")
         existing = dict(row)
         if existing["type"] == "builtin":
-            raise HTTPException(status_code=400, detail="Cannot modify built-in MCP servers")
-        now = datetime.utcnow().isoformat()
-        await db.execute(
-            """UPDATE mcp_servers SET name=?, description=?, command=?, args=?, env=?, config=?, updated_at=?
-               WHERE id=?""",
-            (update.name or existing["name"],
-             update.description if update.description is not None else existing["description"],
-             update.command or existing["command"],
-             json.dumps(update.args) if update.args is not None else existing["args"],
-             json.dumps(update.env) if update.env is not None else existing["env"],
-             json.dumps(update.config) if update.config is not None else existing["config"],
-             now, server_id)
-        )
+            # Builtin servers allow only env and config updates (for API keys etc.)
+            if any([update.name, update.command, update.args is not None]):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Built-in servers only allow env and config updates"
+                )
+            now = datetime.utcnow().isoformat()
+            updates_sql = []
+            params = []
+            if update.env is not None:
+                updates_sql.append("env = ?")
+                params.append(json.dumps(update.env))
+            if update.config is not None:
+                updates_sql.append("config = ?")
+                params.append(json.dumps(update.config))
+            if update.description is not None:
+                updates_sql.append("description = ?")
+                params.append(update.description)
+            if not updates_sql:
+                return {"id": server_id, "message": "nothing to update"}
+            updates_sql.append("updated_at = ?")
+            params.append(now)
+            params.append(server_id)
+            await db.execute(
+                f"UPDATE mcp_servers SET {', '.join(updates_sql)} WHERE id = ?",
+                params
+            )
+        else:
+            now = datetime.utcnow().isoformat()
+            await db.execute(
+                """UPDATE mcp_servers SET name=?, description=?, command=?, args=?, env=?, config=?, updated_at=?
+                   WHERE id=?""",
+                (update.name or existing["name"],
+                 update.description if update.description is not None else existing["description"],
+                 update.command or existing["command"],
+                 json.dumps(update.args) if update.args is not None else existing["args"],
+                 json.dumps(update.env) if update.env is not None else existing["env"],
+                 json.dumps(update.config) if update.config is not None else existing["config"],
+                 now, server_id)
+            )
         await db.commit()
         return {"id": server_id, "updated_at": now}
     finally:
@@ -163,8 +190,17 @@ async def delete_mcp_server(server_id: str):
 
 
 @router.post("/{server_id}/start")
-async def start_server(server_id: str):
-    result = await start_mcp_server(server_id)
+async def start_server(server_id: str, org_id: Optional[str] = None):
+    result = await start_mcp_server(server_id, org_id=org_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/{server_id}/discover")
+async def discover_tools(server_id: str, org_id: Optional[str] = None):
+    """Discover available tools from an MCP server."""
+    result = await discover_mcp_tools(server_id, org_id=org_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -177,11 +213,11 @@ async def stop_server(server_id: str):
 
 
 @router.post("/{server_id}/restart")
-async def restart_server(server_id: str):
+async def restart_server(server_id: str, org_id: Optional[str] = None):
     await stop_mcp_server(server_id)
     import asyncio
     await asyncio.sleep(1)
-    result = await start_mcp_server(server_id)
+    result = await start_mcp_server(server_id, org_id=org_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

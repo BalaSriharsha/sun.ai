@@ -1,12 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 import { BarChart3, Clock, DollarSign, Zap, Activity, ArrowLeft, ChevronRight, Filter, RefreshCw } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const COLORS = ['#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#f97316', '#3b82f6', '#84cc16'];
 
 export default function ObservabilityPage() {
+    const { currentOrgId } = useWorkspace();
     const [stats, setStats] = useState(null);
     const [logs, setLogs] = useState([]);
     const [timeseries, setTimeseries] = useState([]);
@@ -15,15 +17,18 @@ export default function ObservabilityPage() {
     const [filter, setFilter] = useState({ source: '', provider: '', status: '', limit: 50 });
     const [page, setPage] = useState(0);
 
-    useEffect(() => { loadAll(); }, []);
+    useEffect(() => {
+        if (currentOrgId) loadAll();
+    }, [currentOrgId]);
 
     async function loadAll() {
+        if (!currentOrgId) return;
         setLoading(true);
         try {
             const [statsRes, logsRes, tsRes] = await Promise.all([
-                api.getStats().catch(() => ({})),
-                api.getLogs({ limit: filter.limit, offset: page * filter.limit }).catch(() => ({ logs: [] })),
-                api.getTimeseries({ period: 'hour' }).catch(() => ({ timeseries: [] })),
+                api.getStats({ org_id: currentOrgId }).catch(() => ({})),
+                api.getLogs({ limit: filter.limit, offset: page * filter.limit, org_id: currentOrgId }).catch(() => ({ logs: [] })),
+                api.getTimeseries({ interval: 'hour', org_id: currentOrgId }).catch(() => ({ timeseries: [] })),
             ]);
             setStats(statsRes);
             setLogs(logsRes.logs || []);
@@ -33,8 +38,9 @@ export default function ObservabilityPage() {
     }
 
     async function loadLogs() {
+        if (!currentOrgId) return;
         try {
-            const params = { limit: filter.limit, offset: page * filter.limit };
+            const params = { limit: filter.limit, offset: page * filter.limit, org_id: currentOrgId };
             if (filter.source) params.source = filter.source;
             if (filter.provider) params.provider = filter.provider;
             if (filter.status) params.status = filter.status;

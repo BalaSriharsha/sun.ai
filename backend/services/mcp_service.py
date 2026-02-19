@@ -8,41 +8,40 @@ import threading
 from datetime import datetime
 from database import get_db
 
+
+# ---------------------------------------------------------------------------
+# MCP JSON-RPC stdio protocol helpers
+# ---------------------------------------------------------------------------
+
+def _encode_mcp_message(msg: dict) -> bytes:
+    """Encode a dict as an MCP JSON-RPC message with Content-Length header."""
+    data = json.dumps(msg).encode("utf-8")
+    header = f"Content-Length: {len(data)}\r\n\r\n".encode("utf-8")
+    return header + data
+
+
+def _encode_mcp_ndjson(msg: dict) -> bytes:
+    """Encode a dict as a newline-delimited JSON message (for FastMCP)."""
+    return (json.dumps(msg) + "\n").encode("utf-8")
+
+
+MCP_INIT_REQUEST = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "sunny-ai", "version": "1.0.0"},
+    },
+}
+
+MCP_INITIALIZED_NOTIFICATION = {
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized",
+}
+
 BUILTIN_MCP_SERVERS = [
-    {
-        "name": "filesystem",
-        "description": "File system operations - read, write, list, and search files",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
-        "available_tools": [
-            {"name": "read_file", "description": "Read contents of a file", "parameters": {"path": "string"}},
-            {"name": "write_file", "description": "Write content to a file", "parameters": {"path": "string", "content": "string"}},
-            {"name": "list_directory", "description": "List files and directories", "parameters": {"path": "string"}},
-            {"name": "search_files", "description": "Search for files matching a pattern", "parameters": {"path": "string", "pattern": "string"}}
-        ]
-    },
-    {
-        "name": "database",
-        "description": "SQLite database operations - execute queries, list tables, describe schemas",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-sqlite"],
-        "available_tools": [
-            {"name": "execute_query", "description": "Execute a SQL query", "parameters": {"query": "string", "db_path": "string"}},
-            {"name": "list_tables", "description": "List all tables in a database", "parameters": {"db_path": "string"}},
-            {"name": "describe_table", "description": "Get table schema", "parameters": {"table_name": "string", "db_path": "string"}}
-        ]
-    },
-    {
-        "name": "web_scraper",
-        "description": "Web scraping operations - fetch pages, extract text, parse HTML",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-fetch"],
-        "available_tools": [
-            {"name": "fetch_page", "description": "Fetch a web page and return HTML", "parameters": {"url": "string"}},
-            {"name": "extract_text", "description": "Extract text content from a URL", "parameters": {"url": "string", "selector": "string"}},
-            {"name": "extract_links", "description": "Extract all links from a URL", "parameters": {"url": "string"}}
-        ]
-    },
     {
         "name": "github",
         "description": "GitHub API integration - manage repos, issues, PRs, branches, and code search",
@@ -50,34 +49,12 @@ BUILTIN_MCP_SERVERS = [
         "args": ["-y", "@modelcontextprotocol/server-github"],
         "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": ""},
         "available_tools": [
-            {"name": "create_issue", "description": "Create a new GitHub issue", "parameters": {"repo": "string", "title": "string", "body": "string"}},
+            {"name": "list_repos", "description": "List repositories for a user or organization", "parameters": {"owner": "string"}},
             {"name": "list_issues", "description": "List issues in a repository", "parameters": {"repo": "string", "state": "string"}},
+            {"name": "create_issue", "description": "Create a new GitHub issue", "parameters": {"repo": "string", "title": "string", "body": "string"}},
             {"name": "create_pull_request", "description": "Create a pull request", "parameters": {"repo": "string", "title": "string", "head": "string", "base": "string"}},
             {"name": "search_code", "description": "Search code across GitHub", "parameters": {"query": "string"}},
             {"name": "get_file_contents", "description": "Get file contents from a repository", "parameters": {"repo": "string", "path": "string"}}
-        ]
-    },
-    {
-        "name": "brave_search",
-        "description": "Web search using Brave Search API - search the internet for real-time information",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-        "env": {"BRAVE_API_KEY": ""},
-        "available_tools": [
-            {"name": "brave_web_search", "description": "Search the web using Brave Search", "parameters": {"query": "string", "count": "number"}},
-            {"name": "brave_local_search", "description": "Search for local businesses and places", "parameters": {"query": "string"}}
-        ]
-    },
-    {
-        "name": "memory",
-        "description": "Persistent memory using a knowledge graph - store and retrieve entities and relations",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-memory"],
-        "available_tools": [
-            {"name": "create_entities", "description": "Create new entities in the knowledge graph", "parameters": {"entities": "array"}},
-            {"name": "create_relations", "description": "Create relations between entities", "parameters": {"relations": "array"}},
-            {"name": "search_nodes", "description": "Search for nodes by query", "parameters": {"query": "string"}},
-            {"name": "read_graph", "description": "Read the entire knowledge graph", "parameters": {}}
         ]
     },
     {
@@ -86,49 +63,14 @@ BUILTIN_MCP_SERVERS = [
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-docker"],
         "available_tools": [
-            {"name": "list_containers", "description": "List running Docker containers", "parameters": {}},
-            {"name": "create_container", "description": "Create a new container", "parameters": {"image": "string", "name": "string"}},
+            {"name": "list_containers", "description": "List Docker containers (running and stopped)", "parameters": {"all": "boolean"}},
+            {"name": "list_images", "description": "List available Docker images", "parameters": {}},
+            {"name": "create_container", "description": "Create a new container from an image", "parameters": {"image": "string", "name": "string"}},
             {"name": "start_container", "description": "Start a stopped container", "parameters": {"container_id": "string"}},
             {"name": "stop_container", "description": "Stop a running container", "parameters": {"container_id": "string"}},
-            {"name": "list_images", "description": "List available Docker images", "parameters": {}}
-        ]
-    },
-    {
-        "name": "slack",
-        "description": "Slack workspace integration - send messages, manage channels, search conversations",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-slack"],
-        "env": {"SLACK_BOT_TOKEN": "", "SLACK_TEAM_ID": ""},
-        "available_tools": [
-            {"name": "send_message", "description": "Send a message to a Slack channel", "parameters": {"channel": "string", "text": "string"}},
-            {"name": "list_channels", "description": "List available Slack channels", "parameters": {}},
-            {"name": "search_messages", "description": "Search messages in the workspace", "parameters": {"query": "string"}},
-            {"name": "get_channel_history", "description": "Get recent messages from a channel", "parameters": {"channel": "string", "limit": "number"}}
-        ]
-    },
-    {
-        "name": "notion",
-        "description": "Notion workspace integration - search, read, and create pages and databases",
-        "command": "npx",
-        "args": ["-y", "@notionhq/notion-mcp-server"],
-        "env": {"NOTION_API_KEY": ""},
-        "available_tools": [
-            {"name": "search", "description": "Search across all pages and databases", "parameters": {"query": "string"}},
-            {"name": "get_page", "description": "Get a page by ID", "parameters": {"page_id": "string"}},
-            {"name": "create_page", "description": "Create a new page", "parameters": {"parent_id": "string", "title": "string", "content": "string"}},
-            {"name": "query_database", "description": "Query a Notion database", "parameters": {"database_id": "string"}}
-        ]
-    },
-    {
-        "name": "google_drive",
-        "description": "Google Drive integration - search, read, and manage files in Google Drive",
-        "command": "npx",
-        "args": ["-y", "@anthropic/mcp-server-gdrive"],
-        "env": {"GOOGLE_CLIENT_ID": "", "GOOGLE_CLIENT_SECRET": ""},
-        "available_tools": [
-            {"name": "search_files", "description": "Search for files in Google Drive", "parameters": {"query": "string"}},
-            {"name": "read_file", "description": "Read contents of a file from Drive", "parameters": {"file_id": "string"}},
-            {"name": "list_files", "description": "List files in a folder", "parameters": {"folder_id": "string"}}
+            {"name": "remove_container", "description": "Remove a container", "parameters": {"container_id": "string", "force": "boolean"}},
+            {"name": "container_logs", "description": "Get logs from a container", "parameters": {"container_id": "string", "tail": "number"}},
+            {"name": "run_container", "description": "Run a command in a new container and return output", "parameters": {"image": "string", "command": "string"}}
         ]
     }
 ]
@@ -159,23 +101,199 @@ async def seed_builtin_mcp_servers():
     db = await get_db()
     try:
         for server in BUILTIN_MCP_SERVERS:
-            cursor = await db.execute("SELECT id FROM mcp_servers WHERE name = ? AND type = 'builtin'", (server["name"],))
+            cursor = await db.execute("SELECT id, env FROM mcp_servers WHERE name = ? AND type = 'builtin'", (server["name"],))
             existing = await cursor.fetchone()
             if not existing:
                 now = datetime.utcnow().isoformat()
                 await db.execute(
-                    """INSERT INTO mcp_servers (id, name, type, command, args, status, description, available_tools, created_at, updated_at)
-                       VALUES (?, ?, 'builtin', ?, ?, 'stopped', ?, ?, ?, ?)""",
+                    """INSERT INTO mcp_servers (id, name, type, command, args, env, status, description, available_tools, created_at, updated_at)
+                       VALUES (?, ?, 'builtin', ?, ?, ?, 'stopped', ?, ?, ?, ?)""",
                     (str(uuid.uuid4()), server["name"], server["command"],
-                     json.dumps(server["args"]), server["description"],
+                     json.dumps(server["args"]), json.dumps(server.get("env", {})),
+                     server["description"],
                      json.dumps(server["available_tools"]), now, now)
                 )
+            elif server.get("env"):
+                # Backfill env placeholders for existing servers that have none
+                row = dict(existing)
+                current_env = row.get("env") or "{}"
+                if current_env in ("{}", "", None):
+                    await db.execute(
+                        "UPDATE mcp_servers SET env = ? WHERE id = ?",
+                        (json.dumps(server["env"]), row["id"])
+                    )
         await db.commit()
     finally:
         await db.close()
 
 
-async def start_mcp_server(server_id: str) -> dict:
+async def _resolve_server_env(server: dict, db, org_id: str = None) -> tuple:
+    """Resolve MCP server env vars from org-level secrets.
+
+    Checks three sources in priority order:
+      1. Org-level secrets (from the secrets table)
+      2. Non-empty value already stored in the server env field
+      3. System environment variable
+
+    If *org_id* is provided it is used directly; otherwise the org is
+    derived from the server's workspace.
+
+    Returns (resolved_env_dict, missing_keys_list).
+    ``missing_keys_list`` items are dicts: {"key": str, "description": str}.
+    """
+    raw_env = server.get("env", "{}")
+    env_template = json.loads(raw_env) if isinstance(raw_env, str) else (raw_env or {})
+
+    if not env_template:
+        return {}, []
+
+    # Use the caller-supplied org_id, or derive from the server's workspace
+    if not org_id:
+        org_id = "default-org"
+        workspace_id = server.get("workspace_id")
+        if workspace_id:
+            cursor = await db.execute(
+                "SELECT org_id FROM workspaces WHERE id = ?", (workspace_id,)
+            )
+            ws_row = await cursor.fetchone()
+            if ws_row and ws_row["org_id"]:
+                org_id = ws_row["org_id"]
+
+    resolved = {}
+    missing = []
+
+    for key, template_val in env_template.items():
+        # 1) Org-level secret
+        cursor = await db.execute(
+            "SELECT value_encrypted FROM secrets WHERE scope_type = 'org' AND scope_id = ? AND name = ?",
+            (org_id, key),
+        )
+        secret_row = await cursor.fetchone()
+
+        if secret_row and secret_row["value_encrypted"]:
+            resolved[key] = secret_row["value_encrypted"]
+        elif template_val:
+            resolved[key] = template_val
+        elif os.environ.get(key):
+            resolved[key] = os.environ[key]
+        else:
+            missing.append({
+                "key": key,
+                "description": f"Required by {server.get('name', 'MCP server')}",
+            })
+
+    return resolved, missing
+
+
+async def discover_mcp_tools(server_id: str, org_id: str = None) -> dict:
+    """Discover available tools from an MCP server by spawning a temporary subprocess."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM mcp_servers WHERE id = ?", (server_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return {"error": "Server not found"}
+
+        server = dict(row)
+
+        # Resolve env vars from org-level secrets
+        resolved_env, missing = await _resolve_server_env(server, db, org_id=org_id)
+        if missing:
+            key_names = ", ".join(m["key"] for m in missing)
+            return {"error": f"Missing required configuration: {key_names}"}
+
+        command = server["command"]
+        raw_args = server.get("args", "[]")
+        args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or [])
+
+        env = {**os.environ, **resolved_env}
+        backend_dir = os.path.dirname(os.path.dirname(__file__))
+
+        process = None
+        try:
+            process = await asyncio.create_subprocess_exec(
+                command, *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=backend_dir,
+                env=env,
+            )
+
+            async def _write_ndjson(msg: dict):
+                process.stdin.write(_encode_mcp_ndjson(msg))
+                await process.stdin.drain()
+
+            # Give server time to start
+            await asyncio.sleep(1)
+
+            # 1) Initialize (using NDJSON format for FastMCP compatibility)
+            await _write_ndjson(MCP_INIT_REQUEST)
+            init_resp = await asyncio.wait_for(_read_mcp_ndjson_response(process.stdout, 1), timeout=120)
+            if init_resp is None:
+                return {"error": f"MCP server '{server['name']}' did not respond to initialize"}
+
+            # 2) Initialized notification
+            await _write_ndjson(MCP_INITIALIZED_NOTIFICATION)
+
+            # 3) Request tools/list
+            await _write_ndjson({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": {},
+            })
+            tools_resp = await asyncio.wait_for(_read_mcp_ndjson_response(process.stdout, 2), timeout=60)
+
+            if tools_resp and "result" in tools_resp:
+                tools = tools_resp["result"].get("tools", [])
+                # Convert to our format
+                available_tools = []
+                for t in tools:
+                    tool_entry = {
+                        "name": t.get("name", ""),
+                        "description": t.get("description", ""),
+                        "parameters": {}
+                    }
+                    # Extract parameters from inputSchema
+                    input_schema = t.get("inputSchema", {})
+                    props = input_schema.get("properties", {})
+                    for param_name, param_info in props.items():
+                        tool_entry["parameters"][param_name] = param_info.get("type", "string")
+                    available_tools.append(tool_entry)
+
+                # Update database with discovered tools
+                await db.execute(
+                    "UPDATE mcp_servers SET available_tools = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(available_tools), datetime.utcnow().isoformat(), server_id)
+                )
+                await db.commit()
+
+                return {"tools": available_tools, "count": len(available_tools)}
+            else:
+                return {"error": "No tools response from MCP server", "response": tools_resp}
+
+        except asyncio.TimeoutError:
+            return {"error": f"MCP server '{server['name']}' timed out during tool discovery"}
+        except Exception as e:
+            return {"error": f"Tool discovery failed: {str(e)}"}
+        finally:
+            if process:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except (ProcessLookupError, asyncio.TimeoutError):
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass  # Process already exited
+                except Exception:
+                    pass  # Ignore other cleanup errors
+    finally:
+        await db.close()
+
+
+async def start_mcp_server(server_id: str, org_id: str = None) -> dict:
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM mcp_servers WHERE id = ?", (server_id,))
@@ -188,27 +306,49 @@ async def start_mcp_server(server_id: str) -> dict:
         if server_id in _running_processes:
             return {"status": "already_running", "pid": _running_processes[server_id].pid}
 
+        # Resolve env vars from org-level secrets store
+        resolved_env, missing = await _resolve_server_env(server, db, org_id=org_id)
+        if missing:
+            return {
+                "status": "missing_env",
+                "required_keys": missing,
+                "server_name": server["name"],
+            }
+
         command = server["command"]
         args = json.loads(server.get("args", "[]"))
-        env = {**os.environ, **json.loads(server.get("env", "{}"))}
+        env = {**os.environ, **resolved_env}
 
         backend_dir = os.path.dirname(os.path.dirname(__file__))
         full_args = [command] + args
 
         try:
             # Use start_new_session to prevent signal propagation from parent
-            # Use subprocess.DEVNULL for stdin since we don't write to it
-            # Keep stdout/stderr pipes but drain them in background threads
+            # Use subprocess.PIPE for stdin to keep it open - MCP servers use
+            # stdio transport and will exit immediately if stdin gets EOF
+            # (which subprocess.DEVNULL causes)
             process = subprocess.Popen(
                 full_args,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=backend_dir,
                 env=env,
-                start_new_session=True,  # Prevent signals from propagating
+                start_new_session=True,
             )
             _running_processes[server_id] = process
+
+            # Send MCP protocol initialization handshake.
+            # MCP servers expect an initialize + initialized sequence before
+            # they enter their main loop; without it some servers (e.g. Docker)
+            # will time out and exit.
+            # Use NDJSON format for FastMCP compatibility.
+            try:
+                process.stdin.write(_encode_mcp_ndjson(MCP_INIT_REQUEST))
+                process.stdin.write(_encode_mcp_ndjson(MCP_INITIALIZED_NOTIFICATION))
+                process.stdin.flush()
+            except Exception:
+                pass  # best-effort; drain threads will handle any output
 
             # Start background threads to drain stdout and stderr
             # This prevents buffer overflow which causes process hangs
@@ -243,11 +383,17 @@ async def stop_mcp_server(server_id: str) -> dict:
     if server_id in _running_processes:
         process = _running_processes[server_id]
         try:
+            # Close stdin pipe first so the MCP server gets EOF and can
+            # begin a graceful shutdown before we send SIGTERM
+            try:
+                if process.stdin and not process.stdin.closed:
+                    process.stdin.close()
+            except Exception:
+                pass
             # Terminate the process group (since we used start_new_session)
             try:
                 os.killpg(os.getpgid(process.pid), signal.SIGTERM)
             except (ProcessLookupError, OSError):
-                # Process might already be gone, try direct terminate
                 process.terminate()
             try:
                 process.wait(timeout=5)
@@ -299,7 +445,7 @@ async def get_server_status(server_id: str) -> str:
     return "stopped"
 
 
-async def execute_mcp_tool(server_id: str, tool_name: str, parameters: dict) -> dict:
+async def execute_mcp_tool(server_id: str, tool_name: str, parameters: dict, org_id: str = None) -> dict:
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM mcp_servers WHERE id = ?", (server_id,))
@@ -310,26 +456,196 @@ async def execute_mcp_tool(server_id: str, tool_name: str, parameters: dict) -> 
         server = dict(row)
         server_name = server["name"]
 
-        # For built-in servers, execute directly without spawning a process
-        if server["type"] == "builtin":
-            return await _execute_builtin_mcp_tool(server_name, tool_name, parameters)
+        # Resolve env vars from org-level secrets first (needed for both direct and subprocess handlers)
+        resolved_env, missing = await _resolve_server_env(server, db, org_id=org_id)
 
-        return {"error": "Custom MCP server tool execution requires running server"}
+        # Fast path: direct Python implementations for a few common servers
+        if server_name in _DIRECT_HANDLERS:
+            # Check for missing required keys for servers that need them
+            if missing and server_name in ("github", "docker", "brave_search", "slack", "notion"):
+                key_names = ", ".join(m["key"] for m in missing)
+                return {
+                    "error": f"Missing required configuration: {key_names}. "
+                             "Configure them in Secrets & Variables at the organization level."
+                }
+            try:
+                return await _DIRECT_HANDLERS[server_name](tool_name, parameters, resolved_env)
+            except Exception as e:
+                return {"error": str(e)}
+        if missing:
+            key_names = ", ".join(m["key"] for m in missing)
+            return {
+                "error": f"Missing required configuration: {key_names}. "
+                         "Configure them in Secrets & Variables at the organization level."
+            }
+
+        # For every other server (builtin or custom), spawn a temporary MCP
+        # subprocess, run the JSON-RPC handshake, execute the tool, and return.
+        return await _execute_via_mcp_subprocess(server, tool_name, parameters, resolved_env=resolved_env)
     finally:
         await db.close()
 
 
-async def _execute_builtin_mcp_tool(server_name: str, tool_name: str, parameters: dict) -> dict:
+# ---------------------------------------------------------------------------
+# Generic MCP subprocess execution (works for ANY MCP server)
+# ---------------------------------------------------------------------------
+
+async def _read_mcp_message(stdout) -> dict:
+    """Read a single Content-Length-framed MCP JSON-RPC message."""
+    header_buf = b""
+    while not header_buf.endswith(b"\r\n\r\n"):
+        ch = await stdout.read(1)
+        if not ch:
+            return None
+        header_buf += ch
+    length = None
+    for line in header_buf.decode("utf-8", errors="replace").split("\r\n"):
+        if line.lower().startswith("content-length:"):
+            length = int(line.split(":")[1].strip())
+            break
+    if length is None:
+        return None
+    body = await stdout.readexactly(length)
+    return json.loads(body.decode("utf-8"))
+
+
+async def _read_mcp_ndjson(stdout) -> dict:
+    """Read a single newline-delimited JSON message (for FastMCP)."""
+    line = await stdout.readline()
+    if not line:
+        return None
+    text = line.decode("utf-8", errors="replace").strip()
+    if not text:
+        return None
     try:
-        if server_name == "filesystem":
-            return await _fs_tool(tool_name, parameters)
-        elif server_name == "database":
-            return await _db_tool(tool_name, parameters)
-        elif server_name == "web_scraper":
-            return await _scraper_tool(tool_name, parameters)
-        return {"error": f"Unknown server: {server_name}"}
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+async def _read_mcp_response(stdout, expected_id: int, limit: int = 50) -> dict:
+    """Read messages until we find the JSON-RPC response with *expected_id*."""
+    for _ in range(limit):
+        msg = await _read_mcp_message(stdout)
+        if msg is None:
+            return None
+        if msg.get("id") == expected_id:
+            return msg
+    return None
+
+
+async def _read_mcp_ndjson_response(stdout, expected_id: int, limit: int = 100) -> dict:
+    """Read NDJSON messages until we find the JSON-RPC response with *expected_id*."""
+    for _ in range(limit):
+        msg = await _read_mcp_ndjson(stdout)
+        if msg is None:
+            continue
+        if msg.get("id") == expected_id:
+            return msg
+    return None
+
+
+async def _execute_via_mcp_subprocess(server: dict, tool_name: str, parameters: dict, resolved_env: dict = None) -> dict:
+    """Spawn a temporary MCP server, do the init handshake, call a tool, return the result."""
+    command = server["command"]
+    raw_args = server.get("args", "[]")
+    args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or [])
+
+    env = {**os.environ}
+    if resolved_env:
+        env.update(resolved_env)
+    else:
+        raw_env = server.get("env", "{}")
+        env_vars = json.loads(raw_env) if isinstance(raw_env, str) else (raw_env or {})
+        for k, v in env_vars.items():
+            if v:
+                env[k] = v
+
+    backend_dir = os.path.dirname(os.path.dirname(__file__))
+    process = None
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            command, *args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=backend_dir,
+            env=env,
+        )
+
+        async def _write_ndjson(msg: dict):
+            process.stdin.write(_encode_mcp_ndjson(msg))
+            await process.stdin.drain()
+
+        async def _stderr_snippet() -> str:
+            try:
+                data = await asyncio.wait_for(process.stderr.read(4096), timeout=2)
+                return data.decode("utf-8", errors="replace").strip()[:500]
+            except Exception:
+                return ""
+
+        # Give server time to start
+        await asyncio.sleep(1)
+
+        # 1) initialize (using NDJSON format for FastMCP compatibility)
+        await _write_ndjson(MCP_INIT_REQUEST)
+        init_resp = await asyncio.wait_for(_read_mcp_ndjson_response(process.stdout, 1), timeout=120)
+        if init_resp is None:
+            err = await _stderr_snippet()
+            return {"error": f"MCP server '{server.get('name', '?')}' did not respond to initialize. {err}".strip()}
+
+        # 2) initialized notification
+        await _write_ndjson(MCP_INITIALIZED_NOTIFICATION)
+
+        # 3) tools/call
+        await _write_ndjson({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": parameters},
+        })
+        tool_resp = await asyncio.wait_for(_read_mcp_ndjson_response(process.stdout, 2), timeout=60)
+
+        if tool_resp and "result" in tool_resp:
+            content = tool_resp["result"].get("content", [])
+            parts = []
+            for item in content:
+                if item.get("type") == "text":
+                    parts.append(item.get("text", ""))
+                else:
+                    parts.append(json.dumps(item))
+            return {"result": "\n".join(parts) if parts else json.dumps(tool_resp["result"])}
+        elif tool_resp and "error" in tool_resp:
+            return {"error": tool_resp["error"].get("message", "MCP tool execution failed")}
+        else:
+            err = await _stderr_snippet()
+            return {"error": f"No response from MCP server. {err}".strip()}
+
+    except asyncio.TimeoutError:
+        return {"error": f"MCP server '{server.get('name', '?')}' timed out (60s). Ensure required API keys are configured."}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"MCP execution failed: {str(e)}"}
+    finally:
+        if process:
+            try:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    process.kill()
+            except Exception:
+                pass
+
+
+# Map of server names that have fast direct Python handlers
+_DIRECT_HANDLERS = {
+    "filesystem": lambda tool, params, env: _fs_tool(tool, params),
+    "database": lambda tool, params, env: _db_tool(tool, params),
+    "web_scraper": lambda tool, params, env: _scraper_tool(tool, params),
+    "github": lambda tool, params, env: _github_tool(tool, params, env),
+    "docker": lambda tool, params, env: _docker_tool(tool, params, env),
+}
 
 
 async def _fs_tool(tool_name: str, params: dict) -> dict:
@@ -428,3 +744,289 @@ async def _scraper_tool(tool_name: str, params: dict) -> dict:
             links.append({"text": a.get_text(strip=True), "href": a["href"]})
         return {"links": links[:200], "count": len(links)}
     return {"error": f"Unknown scraper tool: {tool_name}"}
+
+
+async def _github_tool(tool_name: str, params: dict, env: dict) -> dict:
+    """Direct Python handler for GitHub API operations."""
+    import httpx
+
+    token = env.get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
+    if not token:
+        return {"error": "GITHUB_PERSONAL_ACCESS_TOKEN not configured. Add it in Secrets & Variables at the organization level."}
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+        try:
+            if tool_name == "list_issues":
+                repo = params.get("repo", "")
+                state = params.get("state", "open")
+                if not repo:
+                    return {"error": "repo parameter is required (format: owner/repo)"}
+                url = f"https://api.github.com/repos/{repo}/issues"
+                resp = await client.get(url, params={"state": state, "per_page": 30})
+                resp.raise_for_status()
+                issues = resp.json()
+                return {
+                    "issues": [
+                        {
+                            "number": i["number"],
+                            "title": i["title"],
+                            "state": i["state"],
+                            "user": i["user"]["login"],
+                            "created_at": i["created_at"],
+                            "labels": [l["name"] for l in i.get("labels", [])],
+                            "url": i["html_url"],
+                        }
+                        for i in issues
+                    ],
+                    "count": len(issues),
+                }
+
+            elif tool_name == "create_issue":
+                repo = params.get("repo", "")
+                title = params.get("title", "")
+                body = params.get("body", "")
+                if not repo or not title:
+                    return {"error": "repo and title parameters are required"}
+                url = f"https://api.github.com/repos/{repo}/issues"
+                resp = await client.post(url, json={"title": title, "body": body})
+                resp.raise_for_status()
+                issue = resp.json()
+                return {
+                    "number": issue["number"],
+                    "title": issue["title"],
+                    "url": issue["html_url"],
+                    "created": True,
+                }
+
+            elif tool_name == "get_file_contents":
+                repo = params.get("repo", "")
+                path = params.get("path", "")
+                ref = params.get("ref", "")
+                if not repo or not path:
+                    return {"error": "repo and path parameters are required"}
+                url = f"https://api.github.com/repos/{repo}/contents/{path}"
+                query_params = {"ref": ref} if ref else {}
+                resp = await client.get(url, params=query_params)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("type") == "file":
+                    import base64
+                    content = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
+                    return {
+                        "path": data["path"],
+                        "content": content[:50000],
+                        "size": data["size"],
+                        "sha": data["sha"],
+                    }
+                elif data.get("type") == "dir" or isinstance(data, list):
+                    # It's a directory listing
+                    entries = data if isinstance(data, list) else [data]
+                    return {
+                        "path": path,
+                        "type": "directory",
+                        "entries": [{"name": e["name"], "type": e["type"], "path": e["path"]} for e in entries],
+                    }
+                return {"error": f"Unknown content type: {data.get('type')}"}
+
+            elif tool_name == "search_code":
+                query = params.get("query", "")
+                if not query:
+                    return {"error": "query parameter is required"}
+                url = "https://api.github.com/search/code"
+                resp = await client.get(url, params={"q": query, "per_page": 20})
+                resp.raise_for_status()
+                data = resp.json()
+                return {
+                    "total_count": data["total_count"],
+                    "items": [
+                        {
+                            "name": item["name"],
+                            "path": item["path"],
+                            "repo": item["repository"]["full_name"],
+                            "url": item["html_url"],
+                        }
+                        for item in data.get("items", [])
+                    ],
+                }
+
+            elif tool_name == "create_pull_request":
+                repo = params.get("repo", "")
+                title = params.get("title", "")
+                head = params.get("head", "")
+                base = params.get("base", "main")
+                body = params.get("body", "")
+                if not repo or not title or not head:
+                    return {"error": "repo, title, and head parameters are required"}
+                url = f"https://api.github.com/repos/{repo}/pulls"
+                resp = await client.post(url, json={"title": title, "head": head, "base": base, "body": body})
+                resp.raise_for_status()
+                pr = resp.json()
+                return {
+                    "number": pr["number"],
+                    "title": pr["title"],
+                    "url": pr["html_url"],
+                    "created": True,
+                }
+
+            elif tool_name == "list_repos":
+                # List repositories for the authenticated user or a specific user/org
+                owner = params.get("owner", "")
+                if owner:
+                    url = f"https://api.github.com/users/{owner}/repos"
+                else:
+                    url = "https://api.github.com/user/repos"
+                resp = await client.get(url, params={"per_page": 30, "sort": "updated"})
+                resp.raise_for_status()
+                repos = resp.json()
+                return {
+                    "repos": [
+                        {
+                            "name": r["name"],
+                            "full_name": r["full_name"],
+                            "description": r.get("description", ""),
+                            "url": r["html_url"],
+                            "stars": r["stargazers_count"],
+                            "language": r.get("language"),
+                        }
+                        for r in repos
+                    ],
+                    "count": len(repos),
+                }
+
+            else:
+                return {"error": f"Unknown GitHub tool: {tool_name}"}
+
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else ""
+            return {"error": f"GitHub API error ({e.response.status_code}): {error_body}"}
+        except Exception as e:
+            return {"error": f"GitHub API error: {str(e)}"}
+
+
+async def _docker_tool(tool_name: str, params: dict, env: dict) -> dict:
+    """Direct Python handler for Docker operations."""
+    try:
+        import docker
+        client = docker.from_env()
+    except Exception as e:
+        return {"error": f"Failed to connect to Docker: {str(e)}. Ensure Docker is running."}
+
+    try:
+        if tool_name == "list_containers":
+            all_containers = params.get("all", True)
+            containers = client.containers.list(all=all_containers)
+            return {
+                "containers": [
+                    {
+                        "id": c.short_id,
+                        "name": c.name,
+                        "image": c.image.tags[0] if c.image.tags else c.image.short_id,
+                        "status": c.status,
+                        "ports": c.ports,
+                    }
+                    for c in containers
+                ],
+                "count": len(containers),
+            }
+
+        elif tool_name == "list_images":
+            images = client.images.list()
+            return {
+                "images": [
+                    {
+                        "id": img.short_id,
+                        "tags": img.tags,
+                        "size": img.attrs.get("Size", 0) // (1024 * 1024),  # MB
+                        "created": img.attrs.get("Created", ""),
+                    }
+                    for img in images
+                ],
+                "count": len(images),
+            }
+
+        elif tool_name == "create_container":
+            image = params.get("image", "")
+            name = params.get("name", "")
+            if not image:
+                return {"error": "image parameter is required"}
+            kwargs = {"image": image, "detach": True}
+            if name:
+                kwargs["name"] = name
+            container = client.containers.create(**kwargs)
+            return {
+                "id": container.short_id,
+                "name": container.name,
+                "status": container.status,
+                "created": True,
+            }
+
+        elif tool_name == "start_container":
+            container_id = params.get("container_id", "")
+            if not container_id:
+                return {"error": "container_id parameter is required"}
+            container = client.containers.get(container_id)
+            container.start()
+            container.reload()
+            return {
+                "id": container.short_id,
+                "name": container.name,
+                "status": container.status,
+                "started": True,
+            }
+
+        elif tool_name == "stop_container":
+            container_id = params.get("container_id", "")
+            if not container_id:
+                return {"error": "container_id parameter is required"}
+            container = client.containers.get(container_id)
+            container.stop()
+            container.reload()
+            return {
+                "id": container.short_id,
+                "name": container.name,
+                "status": container.status,
+                "stopped": True,
+            }
+
+        elif tool_name == "remove_container":
+            container_id = params.get("container_id", "")
+            force = params.get("force", False)
+            if not container_id:
+                return {"error": "container_id parameter is required"}
+            container = client.containers.get(container_id)
+            container.remove(force=force)
+            return {"id": container_id, "removed": True}
+
+        elif tool_name == "container_logs":
+            container_id = params.get("container_id", "")
+            tail = params.get("tail", 100)
+            if not container_id:
+                return {"error": "container_id parameter is required"}
+            container = client.containers.get(container_id)
+            logs = container.logs(tail=tail).decode("utf-8", errors="replace")
+            return {"id": container.short_id, "logs": logs[:20000]}
+
+        elif tool_name == "run_container":
+            image = params.get("image", "")
+            command = params.get("command", "")
+            if not image:
+                return {"error": "image parameter is required"}
+            result = client.containers.run(image, command, remove=True, stdout=True, stderr=True)
+            output = result.decode("utf-8", errors="replace") if isinstance(result, bytes) else str(result)
+            return {"output": output[:20000]}
+
+        else:
+            return {"error": f"Unknown Docker tool: {tool_name}"}
+
+    except docker.errors.NotFound as e:
+        return {"error": f"Docker resource not found: {str(e)}"}
+    except docker.errors.APIError as e:
+        return {"error": f"Docker API error: {str(e)}"}
+    except Exception as e:
+        return {"error": f"Docker error: {str(e)}"}

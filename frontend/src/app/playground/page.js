@@ -1,9 +1,11 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { api, apiStream } from '@/lib/api';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 import { Send, Plus, Trash2, Settings, Bot, User, Loader, MessageSquare, GitBranch, Wrench, Zap } from 'lucide-react';
 
 export default function PlaygroundPage() {
+    const { currentWorkspaceId, currentOrgId } = useWorkspace();
     const [mode, setMode] = useState('chat'); // 'chat' | 'agent' | 'workflow'
     const [providers, setProviders] = useState([]);
     const [allModels, setAllModels] = useState([]);
@@ -31,19 +33,22 @@ export default function PlaygroundPage() {
     const [workflowResult, setWorkflowResult] = useState(null);
 
     useEffect(() => {
-        loadProviders();
+        if (currentOrgId) loadProviders();
         loadConversations();
-        loadAgents();
-        loadWorkflows();
-    }, []);
+        if (currentWorkspaceId) {
+            loadAgents();
+            loadWorkflows();
+        }
+    }, [currentOrgId, currentWorkspaceId]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, agentSteps]);
 
     async function loadProviders() {
+        if (!currentOrgId) return;
         try {
-            const res = await api.getProviders();
+            const res = await api.getProviders(currentOrgId);
             const provs = res.providers || [];
             setProviders(provs);
             const modelsArr = [];
@@ -67,11 +72,13 @@ export default function PlaygroundPage() {
     }
 
     async function loadAgents() {
-        try { setAgents((await api.getAgents()).agents || []); } catch (e) { console.error(e); }
+        if (!currentWorkspaceId) return;
+        try { setAgents((await api.getAgents(currentWorkspaceId)).agents || []); } catch (e) { console.error(e); }
     }
 
     async function loadWorkflows() {
-        try { setWorkflows((await api.getWorkflows()).workflows || []); } catch (e) { console.error(e); }
+        if (!currentWorkspaceId) return;
+        try { setWorkflows((await api.getWorkflows(currentWorkspaceId)).workflows || []); } catch (e) { console.error(e); }
     }
 
     async function loadMessages(convId) {

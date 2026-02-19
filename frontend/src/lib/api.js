@@ -33,8 +33,8 @@ export function apiStream(path, options = {}) {
 }
 
 export const api = {
-    // Providers
-    getProviders: () => apiFetch('/providers'),
+    // Providers (organization-scoped)
+    getProviders: (orgId) => apiFetch(`/providers?org_id=${orgId}`),
     createProvider: (data) => apiFetch('/providers', { method: 'POST', body: JSON.stringify(data) }),
     getProvider: (id) => apiFetch(`/providers/${id}`),
     updateProvider: (id, data) => apiFetch(`/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -57,11 +57,12 @@ export const api = {
     getMCPServer: (id) => apiFetch(`/mcp/${id}`),
     updateMCPServer: (id, data) => apiFetch(`/mcp/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteMCPServer: (id) => apiFetch(`/mcp/${id}`, { method: 'DELETE' }),
-    startMCPServer: (id) => apiFetch(`/mcp/${id}/start`, { method: 'POST' }),
+    startMCPServer: (id, orgId) => apiFetch(`/mcp/${id}/start${orgId ? `?org_id=${orgId}` : ''}`, { method: 'POST' }),
     stopMCPServer: (id) => apiFetch(`/mcp/${id}/stop`, { method: 'POST' }),
-    restartMCPServer: (id) => apiFetch(`/mcp/${id}/restart`, { method: 'POST' }),
+    restartMCPServer: (id, orgId) => apiFetch(`/mcp/${id}/restart${orgId ? `?org_id=${orgId}` : ''}`, { method: 'POST' }),
     getMCPTools: (id) => apiFetch(`/mcp/${id}/tools`),
     executeMCPTool: (id, data) => apiFetch(`/mcp/${id}/execute`, { method: 'POST', body: JSON.stringify(data) }),
+    discoverMCPTools: (id, orgId) => apiFetch(`/mcp/${id}/discover${orgId ? `?org_id=${orgId}` : ''}`, { method: 'POST' }),
 
     // Chat
     getConversations: () => apiFetch('/chat/conversations'),
@@ -70,8 +71,8 @@ export const api = {
     deleteConversation: (id) => apiFetch(`/chat/conversations/${id}`, { method: 'DELETE' }),
     getMessages: (id) => apiFetch(`/chat/conversations/${id}/messages`),
 
-    // Workflows
-    getWorkflows: () => apiFetch('/workflows'),
+    // Workflows (workspace-scoped)
+    getWorkflows: (workspaceId) => apiFetch(`/workflows?workspace_id=${workspaceId}`),
     createWorkflow: (data) => apiFetch('/workflows', { method: 'POST', body: JSON.stringify(data) }),
     getWorkflow: (id) => apiFetch(`/workflows/${id}`),
     updateWorkflow: (id, data) => apiFetch(`/workflows/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -95,8 +96,8 @@ export const api = {
         return apiFetch(`/observability/stats/timeseries?${qs}`);
     },
 
-    // Agents
-    getAgents: () => apiFetch('/agents'),
+    // Agents (workspace-scoped)
+    getAgents: (workspaceId) => apiFetch(`/agents?workspace_id=${workspaceId}`),
     createAgent: (data) => apiFetch('/agents', { method: 'POST', body: JSON.stringify(data) }),
     getAgent: (id) => apiFetch(`/agents/${id}`),
     updateAgent: (id, data) => apiFetch(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

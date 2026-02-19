@@ -1,10 +1,12 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 import { Cpu, MessageSquare, GitBranch, Wrench, Server, BarChart3, Activity, DollarSign, Clock, Zap } from 'lucide-react';
 import Link from 'next/link';
 
 export default function DashboardPage() {
+  const { currentOrgId, currentWorkspaceId } = useWorkspace();
   const [stats, setStats] = useState(null);
   const [providers, setProviders] = useState([]);
   const [workflows, setWorkflows] = useState([]);
@@ -12,16 +14,19 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadDashboard();
-  }, []);
+    if (currentOrgId) {
+      loadDashboard();
+    }
+  }, [currentOrgId, currentWorkspaceId]);
 
   async function loadDashboard() {
+    if (!currentOrgId) return;
     try {
       const [provRes, wfRes, obsStats, logsRes] = await Promise.all([
-        api.getProviders().catch(() => ({ providers: [] })),
-        api.getWorkflows().catch(() => ({ workflows: [] })),
-        api.getStats().catch(() => ({})),
-        api.getLogs({ limit: 5 }).catch(() => ({ logs: [] })),
+        api.getProviders(currentOrgId).catch(() => ({ providers: [] })),
+        currentWorkspaceId ? api.getWorkflows(currentWorkspaceId).catch(() => ({ workflows: [] })) : { workflows: [] },
+        api.getStats({ org_id: currentOrgId }).catch(() => ({})),
+        api.getLogs({ limit: 5, org_id: currentOrgId }).catch(() => ({ logs: [] })),
       ]);
       setProviders(provRes.providers || []);
       setWorkflows(wfRes.workflows || []);

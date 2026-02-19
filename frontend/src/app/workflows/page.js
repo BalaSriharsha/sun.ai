@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { api } from '@/lib/api';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 import {
     Plus, Play, Save, Trash2, X, ArrowLeft, Zap, Cpu, Wrench, Server,
     GitBranch, ArrowRightLeft, FileOutput, Repeat, Clock, Globe, Database,
@@ -370,6 +371,7 @@ function NodeConfigPanel({ node, onUpdate, onClose, onDelete, providers, allMode
 
 // ─────── MAIN WORKFLOW BUILDER ───────
 function WorkflowCanvas() {
+    const { currentWorkspaceId, currentOrgId } = useWorkspace();
     const [workflows, setWorkflows] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeWorkflow, setActiveWorkflow] = useState(null);
@@ -392,15 +394,16 @@ function WorkflowCanvas() {
     const { project } = useReactFlow();
 
     useEffect(() => {
-        loadWorkflows();
-        loadProviders();
+        if (currentWorkspaceId) loadWorkflows();
+        if (currentOrgId) loadProviders();
         loadTools();
         loadMCPServers();
-    }, []);
+    }, [currentWorkspaceId, currentOrgId]);
 
     async function loadProviders() {
+        if (!currentOrgId) return;
         try {
-            const res = await api.getProviders();
+            const res = await api.getProviders(currentOrgId);
             setProviders(res.providers || []);
             const models = {};
             for (const p of (res.providers || [])) {
@@ -419,14 +422,17 @@ function WorkflowCanvas() {
     }
 
     async function loadWorkflows() {
-        try { const res = await api.getWorkflows(); setWorkflows(res.workflows || []); } catch (e) { console.error(e); }
+        if (!currentWorkspaceId) return;
+        setLoading(true);
+        try { const res = await api.getWorkflows(currentWorkspaceId); setWorkflows(res.workflows || []); } catch (e) { console.error(e); }
         setLoading(false);
     }
 
     async function createWorkflow() {
         if (!createName.trim()) return;
         try {
-            const res = await api.createWorkflow({ name: createName, description: createDesc });
+            // Workflows are workspace-scoped
+            const res = await api.createWorkflow({ name: createName, description: createDesc, workspace_id: currentWorkspaceId });
             setShowCreate(false); setCreateName(''); setCreateDesc('');
             loadWorkflows(); openWorkflow(res.id);
         } catch (e) { alert(e.message); }

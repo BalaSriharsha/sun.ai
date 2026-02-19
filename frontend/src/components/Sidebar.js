@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
     LayoutDashboard, Cpu, MessageSquare, GitBranch, Wrench,
-    Server, BarChart3, Zap, Bot, Building2, Key, ChevronDown, Layers
+    Server, BarChart3, Zap, Bot, Building2, Key, ChevronDown, Layers, BookOpen
 } from 'lucide-react';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { useState, useRef, useEffect } from 'react';
@@ -37,6 +37,11 @@ const navItems = [
     {
         section: 'Monitor', items: [
             { href: '/observability', label: 'Observability', icon: BarChart3 },
+        ]
+    },
+    {
+        section: 'Help', items: [
+            { href: '/docs', label: 'Documentation', icon: BookOpen },
         ]
     },
 ];

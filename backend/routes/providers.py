@@ -12,6 +12,7 @@ router = APIRouter()
 class ProviderCreate(BaseModel):
     name: str
     type: str  # openai, anthropic, google, groq, mistral, ollama, openrouter
+    org_id: str  # Required: providers are organization-scoped
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     api_version: Optional[str] = None
@@ -27,13 +28,14 @@ class ProviderUpdate(BaseModel):
 
 
 @router.get("")
-async def list_providers(workspace_id: Optional[str] = None):
+async def list_providers(org_id: str):
+    """List all providers for an organization."""
     db = await get_db()
     try:
-        if workspace_id:
-            cursor = await db.execute("SELECT * FROM providers WHERE workspace_id = ? ORDER BY created_at DESC", (workspace_id,))
-        else:
-            cursor = await db.execute("SELECT * FROM providers ORDER BY created_at DESC")
+        cursor = await db.execute(
+            "SELECT * FROM providers WHERE org_id = ? ORDER BY created_at DESC",
+            (org_id,)
+        )
         rows = await cursor.fetchall()
         providers = []
         for row in rows:
@@ -74,10 +76,15 @@ async def create_provider(provider: ProviderCreate):
 
     db = await get_db()
     try:
+        # Verify org exists
+        cursor = await db.execute("SELECT id FROM organizations WHERE id = ?", (provider.org_id,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Organization not found")
+
         await db.execute(
-            """INSERT INTO providers (id, workspace_id, name, type, api_key_encrypted, base_url, api_version, status, config, created_at, updated_at)
+            """INSERT INTO providers (id, org_id, name, type, api_key_encrypted, base_url, api_version, status, config, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)""",
-            (provider_id, provider.config.get("workspace_id") if provider.config else None,
+            (provider_id, provider.org_id,
              provider.name, provider.type, provider.api_key, provider.base_url, provider.api_version,
              json.dumps(provider.config or {}), now, now)
         )

@@ -13,6 +13,7 @@ router = APIRouter()
 
 class AgentCreate(BaseModel):
     name: str
+    workspace_id: str  # Required: agents are workspace-scoped
     description: Optional[str] = ""
     system_prompt: Optional[str] = "You are a helpful AI assistant."
     provider_id: str
@@ -45,13 +46,14 @@ class AgentQueryRequest(BaseModel):
 
 
 @router.get("")
-async def list_agents(workspace_id: Optional[str] = None):
+async def list_agents(workspace_id: str):
+    """List all agents in a workspace."""
     db = await get_db()
     try:
-        if workspace_id:
-            cursor = await db.execute("SELECT * FROM agents WHERE workspace_id = ? ORDER BY updated_at DESC", (workspace_id,))
-        else:
-            cursor = await db.execute("SELECT * FROM agents ORDER BY updated_at DESC")
+        cursor = await db.execute(
+            "SELECT * FROM agents WHERE workspace_id = ? ORDER BY updated_at DESC",
+            (workspace_id,)
+        )
         rows = await cursor.fetchall()
         agents = []
         for row in rows:
@@ -79,6 +81,11 @@ async def create_agent(agent: AgentCreate):
     now = datetime.utcnow().isoformat()
     db = await get_db()
     try:
+        # Validate workspace exists
+        cursor = await db.execute("SELECT id FROM workspaces WHERE id = ?", (agent.workspace_id,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Workspace not found")
+
         # Validate provider exists
         cursor = await db.execute("SELECT id FROM providers WHERE id = ?", (agent.provider_id,))
         if not await cursor.fetchone():
@@ -88,14 +95,14 @@ async def create_agent(agent: AgentCreate):
             """INSERT INTO agents (id, workspace_id, name, description, system_prompt, provider_id, model_id,
                tools, mcp_servers, temperature, max_tokens, max_iterations, status, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
-            (agent_id, getattr(agent, 'workspace_id', None),
+            (agent_id, agent.workspace_id,
              agent.name, agent.description, agent.system_prompt,
              agent.provider_id, agent.model_id,
              json.dumps(agent.tools), json.dumps(agent.mcp_servers),
              agent.temperature, agent.max_tokens, agent.max_iterations, now, now)
         )
         await db.commit()
-        return {"id": agent_id, "name": agent.name, "status": "active", "created_at": now}
+        return {"id": agent_id, "name": agent.name, "workspace_id": agent.workspace_id, "status": "active", "created_at": now}
     finally:
         await db.close()
 

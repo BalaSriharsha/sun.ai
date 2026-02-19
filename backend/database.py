@@ -264,6 +264,7 @@ async def _run_migrations(db):
     """Add columns for multi-tenancy to existing tables that lack them."""
     migrations = [
         ("providers", "workspace_id", "TEXT"),
+        ("providers", "org_id", "TEXT"),  # Providers are org-scoped
         ("tools", "workspace_id", "TEXT"),
         ("mcp_servers", "workspace_id", "TEXT"),
         ("runbooks", "workspace_id", "TEXT"),
@@ -322,8 +323,18 @@ async def _run_migrations(db):
     await db.execute("UPDATE workspaces SET env_id = ? WHERE env_id IS NULL", (DEFAULT_ENV_ID,))
 
     # Backfill any rows missing workspace_id
-    for table in ["providers", "tools", "mcp_servers", "runbooks", "workflows", "agents", "conversations"]:
+    for table in ["tools", "mcp_servers", "runbooks", "workflows", "agents", "conversations"]:
         await db.execute(f"UPDATE {table} SET workspace_id = ? WHERE workspace_id IS NULL", (DEFAULT_WS_ID,))
+
+    # For providers, set org_id based on workspace's org_id, or default org
+    # First, update providers that have a workspace_id to use that workspace's org_id
+    await db.execute("""
+        UPDATE providers SET org_id = (
+            SELECT org_id FROM workspaces WHERE workspaces.id = providers.workspace_id
+        ) WHERE org_id IS NULL AND workspace_id IS NOT NULL
+    """)
+    # Then set default org for any remaining providers without org_id
+    await db.execute(f"UPDATE providers SET org_id = ? WHERE org_id IS NULL", (DEFAULT_ORG_ID,))
 
     await db.execute(
         "UPDATE observability_logs SET workspace_id = ?, org_id = ? WHERE workspace_id IS NULL",
@@ -355,6 +366,7 @@ async def _run_migrations(db):
         "CREATE INDEX IF NOT EXISTS idx_environments_org ON environments(org_id)",
         "CREATE INDEX IF NOT EXISTS idx_secrets_scope ON secrets(scope_type, scope_id)",
         "CREATE INDEX IF NOT EXISTS idx_providers_workspace ON providers(workspace_id)",
+        "CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id)",
         "CREATE INDEX IF NOT EXISTS idx_tools_workspace ON tools(workspace_id)",
         "CREATE INDEX IF NOT EXISTS idx_agents_workspace ON agents(workspace_id)",
         "CREATE INDEX IF NOT EXISTS idx_workflows_workspace ON workflows(workspace_id)",
@@ -370,118 +382,7 @@ async def _run_migrations(db):
 
 
 async def _seed_demo_agents_workflow():
-    """Seed a demo provider, 2 agents (3 tools + 3 MCP servers each), and a workflow."""
-    import json as _json
-    db = await get_db()
-    try:
-        # Skip if already seeded
-        cursor = await db.execute("SELECT id FROM agents WHERE id = 'agent-research'")
-        if await cursor.fetchone():
-            return
-
-        now = datetime.utcnow().isoformat()
-
-        # ---------- Provider + Model ----------
-        cursor = await db.execute("SELECT id FROM providers WHERE id = 'demo-provider'")
-        if not await cursor.fetchone():
-            await db.execute(
-                """INSERT INTO providers (id, workspace_id, name, type, api_key_encrypted, base_url, status, config, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                ('demo-provider', None, 'Demo AI Provider', 'openai', '', 'https://api.openai.com/v1', 'active', '{}', now, now)
-            )
-            await db.execute(
-                """INSERT INTO models (id, provider_id, model_id, name, context_window, supports_tools, supports_streaming, discovered_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                ('demo-model', 'demo-provider', 'gpt-4o', 'GPT-4o', 128000, 1, 1, now)
-            )
-
-        # ---------- Look up tool IDs by name ----------
-        tool_map = {}
-        cursor = await db.execute("SELECT id, name FROM tools")
-        for row in await cursor.fetchall():
-            tool_map[row['name']] = row['id']
-
-        # ---------- Look up MCP server IDs by name ----------
-        mcp_map = {}
-        cursor = await db.execute("SELECT id, name FROM mcp_servers")
-        for row in await cursor.fetchall():
-            mcp_map[row['name']] = row['id']
-
-        # ---------- Agent 1: Research & Analysis ----------
-        agent1_tools = [tool_map.get(n, n) for n in ['web_search', 'text_summarize', 'json_transform']]
-        agent1_mcp = [mcp_map.get(n, n) for n in ['brave_search', 'web_scraper', 'memory']]
-        await db.execute(
-            """INSERT INTO agents (id, workspace_id, name, description, system_prompt,
-                                   provider_id, model_id, tools, mcp_servers,
-                                   temperature, max_tokens, max_iterations, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ('agent-research', None,
-             'Research & Analysis Agent',
-             'Uses web search, text summarization, and JSON transformation with Brave Search, Web Scraper, and Memory MCP servers to research topics and produce structured findings.',
-             'You are a research and analysis agent. Use web search to find information, scrape web pages for detailed content, store important findings in memory for later retrieval, and produce clear, well-structured summaries. When given a research task, follow these steps: 1) Search the web for relevant sources, 2) Scrape the most promising pages, 3) Store key findings in memory, 4) Summarize everything into a comprehensive report.',
-             'demo-provider', 'demo-model',
-             _json.dumps(agent1_tools), _json.dumps(agent1_mcp),
-             0.7, 4096, 10, 'active', now, now)
-        )
-
-        # ---------- Agent 2: DevOps & Data ----------
-        agent2_tools = [tool_map.get(n, n) for n in ['code_execute', 'http_request', 'calculator']]
-        agent2_mcp = [mcp_map.get(n, n) for n in ['filesystem', 'database', 'docker']]
-        await db.execute(
-            """INSERT INTO agents (id, workspace_id, name, description, system_prompt,
-                                   provider_id, model_id, tools, mcp_servers,
-                                   temperature, max_tokens, max_iterations, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ('agent-devops', None,
-             'DevOps & Data Agent',
-             'Executes code, queries databases, manages files, works with Docker containers, and performs calculations using Filesystem, Database, and Docker MCP servers.',
-             'You are a DevOps and data agent. Execute Python code for data processing, make HTTP requests to external APIs, query SQLite databases for structured data, manage files on the filesystem, interact with Docker containers, and perform mathematical calculations. When given a task, break it into steps: 1) Gather input data, 2) Process and transform it, 3) Store or return results.',
-             'demo-provider', 'demo-model',
-             _json.dumps(agent2_tools), _json.dumps(agent2_mcp),
-             0.5, 4096, 10, 'active', now, now)
-        )
-
-        # ---------- Workflow: Full Stack Analysis Pipeline ----------
-        workflow_nodes = [
-            {
-                'id': 'node-research',
-                'type': 'agent',
-                'label': 'Research & Analysis',
-                'data': {
-                    'agent_id': 'agent-research',
-                    'prompt_template': 'Research the following topic thoroughly and produce a detailed summary with key findings: {{input}}',
-                },
-                'position': {'x': 100, 'y': 100},
-            },
-            {
-                'id': 'node-devops',
-                'type': 'agent',
-                'label': 'Data Processing & Execution',
-                'data': {
-                    'agent_id': 'agent-devops',
-                    'prompt_template': 'Based on the following research findings, extract key data points, run any needed calculations, and produce a final structured report: {{input}}',
-                },
-                'position': {'x': 500, 'y': 100},
-            },
-        ]
-        workflow_edges = [
-            {
-                'id': 'edge-1',
-                'source': 'node-research',
-                'target': 'node-devops',
-                'label': 'Research results',
-            },
-        ]
-        await db.execute(
-            """INSERT INTO workflows (id, workspace_id, name, description, nodes, edges, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ('workflow-fullstack', None,
-             'Full Stack Analysis Pipeline',
-             'A two-stage workflow that first uses the Research & Analysis Agent to gather and summarize information, then passes the findings to the DevOps & Data Agent for data processing, calculations, and structured report generation.',
-             _json.dumps(workflow_nodes), _json.dumps(workflow_edges),
-             'active', now, now)
-        )
-
-        await db.commit()
-    finally:
-        await db.close()
+    """Seed demo data - currently disabled."""
+    # Demo provider, agents, and workflows have been removed.
+    # Users should create their own providers and agents via the UI.
+    pass

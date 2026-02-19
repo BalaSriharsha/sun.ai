@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 import { Plus, RefreshCw, Trash2, CheckCircle, XCircle, ChevronDown, ChevronRight, Eye } from 'lucide-react';
 
 const PROVIDER_TYPES = [
@@ -17,6 +18,7 @@ const PROVIDER_TYPES = [
 ];
 
 export default function ProvidersPage() {
+    const { currentOrgId } = useWorkspace();
     const [providers, setProviders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
@@ -26,11 +28,15 @@ export default function ProvidersPage() {
     const [formError, setFormError] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
-    useEffect(() => { loadProviders(); }, []);
+    useEffect(() => {
+        if (currentOrgId) loadProviders();
+    }, [currentOrgId]);
 
     async function loadProviders() {
+        if (!currentOrgId) return;
+        setLoading(true);
         try {
-            const res = await api.getProviders();
+            const res = await api.getProviders(currentOrgId);
             setProviders(res.providers || []);
         } catch (e) {
             console.error(e);
@@ -43,7 +49,12 @@ export default function ProvidersPage() {
         setFormError('');
         setSubmitting(true);
         try {
-            const data = { name: form.name, type: form.type, api_key: form.api_key };
+            const data = {
+                name: form.name,
+                type: form.type,
+                api_key: form.api_key,
+                org_id: currentOrgId,  // Providers are organization-scoped
+            };
             if (form.base_url) data.base_url = form.base_url;
             if (form.api_version) data.api_version = form.api_version;
             await api.createProvider(data);

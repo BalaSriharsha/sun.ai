@@ -132,6 +132,7 @@ async def chat_completions(request: ChatRequest):
                 provider_id=provider["id"],
                 provider_name=provider["name"],
                 conversation_id=conv_id,
+                org_id=provider.get("org_id"),
             ):
                 if chunk["type"] == "content":
                     full_content += chunk["content"]
@@ -169,6 +170,7 @@ async def chat_completions(request: ChatRequest):
             provider_id=provider["id"],
             provider_name=provider["name"],
             conversation_id=conv_id,
+            org_id=provider.get("org_id"),
         )
 
         # Save assistant message

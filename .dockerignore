@@ -1,0 +1,65 @@
+# Git
+.git
+.gitignore
+
+# Claude
+.claude
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+*.so
+.venv
+venv
+ENV
+env
+*.egg-info
+.eggs
+dist
+build
+
+# Node
+**/node_modules
+frontend/.next
+frontend/out
+
+# Database (will be created fresh or mounted)
+backend/*.db
+backend/*.db-journal
+backend/*.db-wal
+backend/*.db-shm
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs
+
+# Test files
+agent_tests.json
+**/test_*.py
+
+# Environment files (secrets should be passed via env vars)
+.env
+.env.*
+*.env
+
+# Documentation
+*.md
+docs
+
+# Misc
+*.bak
+*.tmp

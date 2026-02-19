@@ -11,6 +11,7 @@ router = APIRouter()
 
 class WorkflowCreate(BaseModel):
     name: str
+    workspace_id: str  # Required: workflows are workspace-scoped
     description: Optional[str] = ""
     nodes: Optional[list] = []
     edges: Optional[list] = []
@@ -27,13 +28,14 @@ class WorkflowExecuteRequest(BaseModel):
 
 
 @router.get("")
-async def list_workflows(workspace_id: Optional[str] = None):
+async def list_workflows(workspace_id: str):
+    """List all workflows in a workspace."""
     db = await get_db()
     try:
-        if workspace_id:
-            cursor = await db.execute("SELECT * FROM workflows WHERE workspace_id = ? ORDER BY updated_at DESC", (workspace_id,))
-        else:
-            cursor = await db.execute("SELECT * FROM workflows ORDER BY updated_at DESC")
+        cursor = await db.execute(
+            "SELECT * FROM workflows WHERE workspace_id = ? ORDER BY updated_at DESC",
+            (workspace_id,)
+        )
         rows = await cursor.fetchall()
         workflows = []
         for row in rows:
@@ -53,15 +55,20 @@ async def create_workflow(workflow: WorkflowCreate):
     now = datetime.utcnow().isoformat()
     db = await get_db()
     try:
+        # Validate workspace exists
+        cursor = await db.execute("SELECT id FROM workspaces WHERE id = ?", (workflow.workspace_id,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Workspace not found")
+
         await db.execute(
             """INSERT INTO workflows (id, workspace_id, name, description, nodes, edges, status, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)""",
-            (workflow_id, getattr(workflow, 'workspace_id', None),
+            (workflow_id, workflow.workspace_id,
              workflow.name, workflow.description,
              json.dumps(workflow.nodes), json.dumps(workflow.edges), now, now)
         )
         await db.commit()
-        return {"id": workflow_id, "name": workflow.name, "status": "draft", "created_at": now}
+        return {"id": workflow_id, "name": workflow.name, "workspace_id": workflow.workspace_id, "status": "draft", "created_at": now}
     finally:
         await db.close()
 

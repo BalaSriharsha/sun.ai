@@ -1,17 +1,26 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { api } from '@/lib/api';
-import { Plus, Server, Play, Square, RotateCw, Trash2, ChevronDown, ChevronRight, X, HardDrive, Database, Globe } from 'lucide-react';
+import { api, apiFetch } from '@/lib/api';
+import { useWorkspace } from '@/lib/WorkspaceContext';
+import { Plus, Server, Play, Square, RotateCw, Trash2, ChevronDown, ChevronRight, X, HardDrive, Database, Globe, Lock, Pencil, RefreshCw } from 'lucide-react';
 
 const MCP_ICONS = { filesystem: HardDrive, database: Database, web_scraper: Globe };
 
 export default function MCPPage() {
+    const { currentOrgId } = useWorkspace();
     const [servers, setServers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
+    const [editingServer, setEditingServer] = useState(null);
     const [expanded, setExpanded] = useState(null);
     const [serverTools, setServerTools] = useState({});
+    const [discovering, setDiscovering] = useState({});
     const [form, setForm] = useState({ name: '', type: 'custom', command: '', args: '', env_vars: '{}', config: '{}' });
+
+    // Env-var configuration modal state
+    const [envModal, setEnvModal] = useState(null);
+    const [envValues, setEnvValues] = useState({});
+    const [envSaving, setEnvSaving] = useState(false);
 
     useEffect(() => { loadServers(); }, []);
 
@@ -25,31 +34,158 @@ export default function MCPPage() {
 
     async function handleCreate(e) {
         e.preventDefault();
+        const orgId = currentOrgId || 'default-org';
         try {
-            await api.createMCPServer({
+            const result = await api.createMCPServer({
                 name: form.name,
                 command: form.command,
-                args: form.args.split(' ').filter(Boolean),
-                env_vars: JSON.parse(form.env_vars),
+                args: form.args ? JSON.parse(form.args) : [],
+                env: JSON.parse(form.env_vars),
                 config: JSON.parse(form.config)
             });
             setShowModal(false);
+            setForm({ name: '', type: 'custom', command: '', args: '', env_vars: '{}', config: '{}' });
+            // Auto-discover tools for the new server
+            if (result.id) {
+                try {
+                    await api.discoverMCPTools(result.id, orgId);
+                } catch (err) {
+                    console.log('Tool discovery skipped:', err.message);
+                }
+            }
+            loadServers();
+        } catch (e) { alert(e.message); }
+    }
+
+    function handleEdit(server) {
+        setEditingServer(server);
+        setForm({
+            name: server.name,
+            command: server.command || '',
+            args: JSON.stringify(server.args || []),
+            env_vars: JSON.stringify(server.env || {}, null, 2),
+            config: JSON.stringify(server.config || {}, null, 2)
+        });
+        setShowModal(true);
+    }
+
+    async function handleUpdate(e) {
+        e.preventDefault();
+        try {
+            await api.updateMCPServer(editingServer.id, {
+                name: form.name,
+                command: form.command,
+                args: JSON.parse(form.args || '[]'),
+                env: JSON.parse(form.env_vars),
+                config: JSON.parse(form.config)
+            });
+            setShowModal(false);
+            setEditingServer(null);
             setForm({ name: '', type: 'custom', command: '', args: '', env_vars: '{}', config: '{}' });
             loadServers();
         } catch (e) { alert(e.message); }
     }
 
-    async function handleAction(id, action) {
+    async function handleDiscover(serverId) {
+        const orgId = currentOrgId || 'default-org';
+        setDiscovering(prev => ({ ...prev, [serverId]: true }));
         try {
-            if (action === 'start') await api.startMCPServer(id);
-            else if (action === 'stop') await api.stopMCPServer(id);
-            else if (action === 'restart') await api.restartMCPServer(id);
-            else if (action === 'delete') {
+            const result = await api.discoverMCPTools(serverId, orgId);
+            if (result.tools) {
+                setServerTools(prev => ({ ...prev, [serverId]: result.tools }));
+            }
+            loadServers();
+        } catch (e) {
+            alert('Tool discovery failed: ' + e.message);
+        } finally {
+            setDiscovering(prev => ({ ...prev, [serverId]: false }));
+        }
+    }
+
+    function closeModal() {
+        setShowModal(false);
+        setEditingServer(null);
+        setForm({ name: '', type: 'custom', command: '', args: '', env_vars: '{}', config: '{}' });
+    }
+
+    async function handleAction(id, action) {
+        const orgId = currentOrgId || 'default-org';
+        try {
+            if (action === 'start') {
+                const result = await api.startMCPServer(id, orgId);
+                if (result.status === 'missing_env') {
+                    setEnvModal({
+                        serverId: id,
+                        serverName: result.server_name,
+                        requiredKeys: result.required_keys,
+                    });
+                    setEnvValues({});
+                    return;
+                }
+                // Auto-discover tools after successful start
+                if (result.status === 'running') {
+                    try {
+                        const discoverResult = await api.discoverMCPTools(id, orgId);
+                        if (discoverResult.tools) {
+                            setServerTools(prev => ({ ...prev, [id]: discoverResult.tools }));
+                        }
+                    } catch (err) {
+                        console.log('Tool discovery after start:', err.message);
+                    }
+                }
+            } else if (action === 'stop') await api.stopMCPServer(id);
+            else if (action === 'restart') {
+                await api.restartMCPServer(id, orgId);
+                // Auto-discover tools after restart
+                try {
+                    const discoverResult = await api.discoverMCPTools(id, orgId);
+                    if (discoverResult.tools) {
+                        setServerTools(prev => ({ ...prev, [id]: discoverResult.tools }));
+                    }
+                } catch (err) {
+                    console.log('Tool discovery after restart:', err.message);
+                }
+            } else if (action === 'delete') {
                 if (!confirm('Delete this MCP server?')) return;
                 await api.deleteMCPServer(id);
             }
             loadServers();
         } catch (e) { alert(e.message); }
+    }
+
+    async function handleSaveEnvAndStart(e) {
+        e.preventDefault();
+        setEnvSaving(true);
+        const orgId = currentOrgId || 'default-org';
+        try {
+            for (const req of envModal.requiredKeys) {
+                const val = envValues[req.key];
+                if (!val) continue;
+                await apiFetch('/secrets', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        scope_type: 'org',
+                        scope_id: orgId,
+                        name: req.key,
+                        value: val,
+                        type: 'secret',
+                        description: `${req.description || 'Required by ' + envModal.serverName + ' MCP server'}`,
+                    }),
+                });
+            }
+            const result = await api.startMCPServer(envModal.serverId, orgId);
+            if (result.status === 'missing_env') {
+                alert('Some required values are still missing. Please fill in all fields.');
+                return;
+            }
+            setEnvModal(null);
+            setEnvValues({});
+            loadServers();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            setEnvSaving(false);
+        }
     }
 
     async function toggleExpand(id) {
@@ -127,7 +263,18 @@ export default function MCPPage() {
                                         <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleAction(server.id, 'restart')} title="Restart">
                                             <RotateCw size={14} />
                                         </button>
-                                        {!isBuiltIn && (
+                                        <button
+                                            className="btn btn-ghost btn-icon btn-sm"
+                                            onClick={() => handleDiscover(server.id)}
+                                            title="Discover Tools"
+                                            disabled={discovering[server.id]}
+                                        >
+                                            <RefreshCw size={14} className={discovering[server.id] ? 'animate-spin' : ''} />
+                                        </button>
+                                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleEdit(server)} title="Edit">
+                                            <Pencil size={14} />
+                                        </button>
+                                        {server.type !== 'builtin' && (
                                             <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleAction(server.id, 'delete')} title="Delete">
                                                 <Trash2 size={14} />
                                             </button>
@@ -162,37 +309,85 @@ export default function MCPPage() {
             )}
 
             {showModal && (
-                <div className="modal-overlay" onClick={() => setShowModal(false)}>
+                <div className="modal-overlay" onClick={closeModal}>
                     <div className="modal" onClick={e => e.stopPropagation()}>
                         <div className="modal-header">
-                            <h2 className="modal-title">Add Custom MCP Server</h2>
-                            <button className="btn btn-ghost btn-icon" onClick={() => setShowModal(false)}><X size={18} /></button>
+                            <h2 className="modal-title">{editingServer ? 'Edit MCP Server' : 'Add Custom MCP Server'}</h2>
+                            <button className="btn btn-ghost btn-icon" onClick={closeModal}><X size={18} /></button>
                         </div>
-                        <form onSubmit={handleCreate}>
+                        <form onSubmit={editingServer ? handleUpdate : handleCreate}>
                             <div className="form-group">
                                 <label className="form-label">Server Name</label>
                                 <input className="form-input" required value={form.name}
-                                    onChange={e => setForm({ ...form, name: e.target.value })} placeholder="My MCP Server" />
+                                    onChange={e => setForm({ ...form, name: e.target.value })}
+                                    placeholder="jira"
+                                    disabled={editingServer?.type === 'builtin'} />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Command</label>
                                 <input className="form-input" required value={form.command}
-                                    onChange={e => setForm({ ...form, command: e.target.value })} placeholder="python3" />
+                                    onChange={e => setForm({ ...form, command: e.target.value })}
+                                    placeholder="npx"
+                                    disabled={editingServer?.type === 'builtin'} />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Arguments</label>
+                                <label className="form-label">Arguments (JSON array)</label>
                                 <input className="form-input" value={form.args}
-                                    onChange={e => setForm({ ...form, args: e.target.value })} placeholder="server.py --port 8080" />
+                                    onChange={e => setForm({ ...form, args: e.target.value })}
+                                    placeholder='["-y", "jira-mcp"]'
+                                    disabled={editingServer?.type === 'builtin'} />
+                                <small style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>JSON array format, e.g. [&quot;-y&quot;, &quot;package-name&quot;]</small>
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Environment Variables (JSON)</label>
                                 <textarea className="form-textarea" value={form.env_vars}
                                     onChange={e => setForm({ ...form, env_vars: e.target.value })}
-                                    style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }} rows={3} />
+                                    placeholder='{"API_KEY": "", "API_URL": ""}'
+                                    style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }} rows={4} />
+                                <small style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>Empty values will be resolved from org-level secrets</small>
                             </div>
                             <div className="modal-actions">
-                                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-primary">Add Server</button>
+                                <button type="button" className="btn btn-secondary" onClick={closeModal}>Cancel</button>
+                                <button type="submit" className="btn btn-primary">
+                                    {editingServer ? 'Save Changes' : 'Add Server'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {envModal && (
+                <div className="modal-overlay" onClick={() => setEnvModal(null)}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h2 className="modal-title">Configure {envModal.serverName}</h2>
+                            <button className="btn btn-ghost btn-icon" onClick={() => setEnvModal(null)}><X size={18} /></button>
+                        </div>
+                        <div style={{ padding: '0 24px 8px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 13 }}>
+                            <Lock size={14} />
+                            <span>These secrets will be saved at the <strong>organization</strong> level.</span>
+                        </div>
+                        <form onSubmit={handleSaveEnvAndStart}>
+                            {envModal.requiredKeys.map(req => (
+                                <div className="form-group" key={req.key} style={{ padding: '0 24px' }}>
+                                    <label className="form-label" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{req.key}</label>
+                                    <input
+                                        className="form-input"
+                                        type="password"
+                                        required
+                                        value={envValues[req.key] || ''}
+                                        onChange={e => setEnvValues(prev => ({ ...prev, [req.key]: e.target.value }))}
+                                        placeholder={req.description || `Enter value for ${req.key}`}
+                                        autoFocus={envModal.requiredKeys.indexOf(req) === 0}
+                                    />
+                                </div>
+                            ))}
+                            <div className="modal-actions" style={{ padding: '16px 24px' }}>
+                                <button type="button" className="btn btn-secondary" onClick={() => setEnvModal(null)}>Cancel</button>
+                                <button type="submit" className="btn btn-primary" disabled={envSaving}>
+                                    {envSaving ? 'Saving...' : 'Save & Start'}
+                                </button>
                             </div>
                         </form>
                     </div>

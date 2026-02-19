@@ -2,7 +2,23 @@
   "permissions": {
     "allow": [
       "Bash(python -c:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "Bash(sqlite3:*)",
+      "Bash(npx:*)",
+      "Bash(npm run lint:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(uvx --version)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:community.atlassian.com)",
+      "WebSearch",
+      "Bash(pkill:*)",
+      "Bash(python3:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }

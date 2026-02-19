@@ -144,20 +144,25 @@ async def create_secret(secret: SecretCreate):
         if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail=f"{secret.scope_type} not found")
 
-        # Check uniqueness within scope
+        # Upsert: if a secret with the same name already exists at this scope,
+        # update it instead of raising an error.
         cursor = await db.execute(
             "SELECT id FROM secrets WHERE scope_type = ? AND scope_id = ? AND name = ?",
             (secret.scope_type, secret.scope_id, secret.name)
         )
-        if await cursor.fetchone():
-            raise HTTPException(
-                status_code=400,
-                detail=f"A secret/variable named '{secret.name}' already exists in this {secret.scope_type}"
-            )
-
-        secret_id = str(uuid.uuid4())
+        existing = await cursor.fetchone()
         now = datetime.utcnow().isoformat()
 
+        if existing:
+            existing_id = existing["id"]
+            await db.execute(
+                "UPDATE secrets SET value_encrypted = ?, type = ?, description = ?, updated_at = ? WHERE id = ?",
+                (secret.value, secret.type, secret.description or "", now, existing_id)
+            )
+            await db.commit()
+            return {"id": existing_id, "name": secret.name, "type": secret.type, "scope_type": secret.scope_type, "updated": True}
+
+        secret_id = str(uuid.uuid4())
         await db.execute(
             """INSERT INTO secrets (id, scope_type, scope_id, name, value_encrypted, type, description, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",

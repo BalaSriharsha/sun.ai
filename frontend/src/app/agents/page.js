@@ -1,11 +1,13 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 import { Plus, Bot, Play, Trash2, Edit, X, Wrench, Cpu, Send, ChevronDown, ChevronRight, Server } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 export default function AgentsPage() {
+    const { currentWorkspaceId, currentOrgId } = useWorkspace();
     const [agents, setAgents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
@@ -25,23 +27,26 @@ export default function AgentsPage() {
     });
 
     useEffect(() => {
-        loadAgents();
-        loadProviders();
+        if (currentWorkspaceId) loadAgents();
+        if (currentOrgId) loadProviders();
         loadTools();
         loadMCPServers();
-    }, []);
+    }, [currentWorkspaceId, currentOrgId]);
 
     async function loadAgents() {
+        if (!currentWorkspaceId) return;
+        setLoading(true);
         try {
-            const res = await api.getAgents();
+            const res = await api.getAgents(currentWorkspaceId);
             setAgents(res.agents || []);
         } catch (e) { console.error(e); }
         setLoading(false);
     }
 
     async function loadProviders() {
+        if (!currentOrgId) return;
         try {
-            const res = await api.getProviders();
+            const res = await api.getProviders(currentOrgId);
             setProviders(res.providers || []);
             const models = {};
             for (const p of (res.providers || [])) {
@@ -75,6 +80,8 @@ export default function AgentsPage() {
             if (editingAgent) {
                 await api.updateAgent(editingAgent.id, data);
             } else {
+                // Agents are workspace-scoped
+                data.workspace_id = currentWorkspaceId;
                 await api.createAgent(data);
             }
             setShowModal(false);
@@ -333,14 +340,6 @@ export default function AgentsPage() {
                             </div>
 
                             <div className="form-group">
-                                <label className="form-label">System Prompt</label>
-                                <textarea className="form-textarea" value={form.system_prompt}
-                                    onChange={e => setForm({ ...form, system_prompt: e.target.value })}
-                                    style={{ minHeight: 100 }}
-                                    placeholder="You are a helpful AI assistant that can use tools to complete tasks." />
-                            </div>
-
-                            <div className="form-group">
                                 <label className="form-label">Tools ({form.tools.length} selected)</label>
                                 <div style={{
                                     display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6,
@@ -386,6 +385,14 @@ export default function AgentsPage() {
                                         <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: 8 }}>No MCP servers configured</div>
                                     )}
                                 </div>
+                            </div>
+
+                            <div className="form-group">
+                                <label className="form-label">Runbook</label>
+                                <textarea className="form-textarea" value={form.system_prompt}
+                                    onChange={e => setForm({ ...form, system_prompt: e.target.value })}
+                                    style={{ minHeight: 120 }}
+                                    placeholder="Define the agent's behavior, instructions, and workflow steps..." />
                             </div>
 
                             <div className="grid-2" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
