@@ -77,6 +77,7 @@ BUILTIN_MCP_SERVERS = [
 
 _running_processes = {}
 _output_readers = {}  # Store output reader threads to keep them alive
+_mcp_tool_processes = {}  # Store long-lived MCP subprocesses for execute_mcp_tool
 
 
 def _drain_pipe(pipe, server_id: str, pipe_name: str):
@@ -469,7 +470,12 @@ async def execute_mcp_tool(server_id: str, tool_name: str, parameters: dict, org
                              "Configure them in Secrets & Variables at the organization level."
                 }
             try:
-                return await _DIRECT_HANDLERS[server_name](tool_name, parameters, resolved_env)
+                # agent_service maps MCP tools with a `<server_name>__` prefix, strip it for direct handlers
+                raw_tool_name = tool_name
+                prefix = f"{server_name}__"
+                if tool_name.startswith(prefix):
+                    raw_tool_name = tool_name[len(prefix):]
+                return await _DIRECT_HANDLERS[server_name](raw_tool_name, parameters, resolved_env)
             except Exception as e:
                 return {"error": str(e)}
         if missing:
@@ -479,9 +485,8 @@ async def execute_mcp_tool(server_id: str, tool_name: str, parameters: dict, org
                          "Configure them in Secrets & Variables at the organization level."
             }
 
-        # For every other server (builtin or custom), spawn a temporary MCP
-        # subprocess, run the JSON-RPC handshake, execute the tool, and return.
-        return await _execute_via_mcp_subprocess(server, tool_name, parameters, resolved_env=resolved_env)
+        # For every other server (builtin or custom), execute the tool via the persistent MCP subprocess.
+        return await _execute_via_mcp_subprocess(server_id, server, tool_name, parameters, resolved_env=resolved_env)
     finally:
         await db.close()
 
@@ -509,35 +514,42 @@ async def _read_mcp_message(stdout) -> dict:
     return json.loads(body.decode("utf-8"))
 
 
-async def _read_mcp_ndjson(stdout) -> dict:
-    """Read a single newline-delimited JSON message (for FastMCP)."""
-    line = await stdout.readline()
-    if not line:
-        return None
-    text = line.decode("utf-8", errors="replace").strip()
-    if not text:
-        return None
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
-
-
-async def _read_mcp_response(stdout, expected_id: int, limit: int = 50) -> dict:
-    """Read messages until we find the JSON-RPC response with *expected_id*."""
-    for _ in range(limit):
-        msg = await _read_mcp_message(stdout)
-        if msg is None:
+async def _read_universal_mcp_message(stdout) -> dict:
+    """Read either an NDJSON message or a Content-Length JSON-RPC message."""
+    while True:
+        line = await stdout.readline()
+        if not line:
             return None
-        if msg.get("id") == expected_id:
-            return msg
-    return None
+        
+        text = line.decode("utf-8", errors="replace").strip()
+        if not text:
+            continue
+        
+        if text.startswith("{"):
+            # It's NDJSON
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                continue
+        elif text.lower().startswith("content-length:"):
+            # It's standard MCP with HTTP-like headers
+            length = int(text.split(":")[1].strip())
+            # Read until empty line
+            while True:
+                hdr_line = await stdout.readline()
+                if not hdr_line or hdr_line == b"\r\n" or hdr_line == b"\n":
+                    break
+            
+            body = await stdout.readexactly(length)
+            try:
+                return json.loads(body.decode("utf-8"))
+            except json.JSONDecodeError:
+                return None
 
-
-async def _read_mcp_ndjson_response(stdout, expected_id: int, limit: int = 100) -> dict:
-    """Read NDJSON messages until we find the JSON-RPC response with *expected_id*."""
+async def _read_universal_mcp_response(stdout, expected_id: int, limit: int = 100) -> dict:
+    """Read messages universally until we find the JSON-RPC response with *expected_id*."""
     for _ in range(limit):
-        msg = await _read_mcp_ndjson(stdout)
+        msg = await _read_universal_mcp_message(stdout)
         if msg is None:
             continue
         if msg.get("id") == expected_id:
@@ -545,97 +557,137 @@ async def _read_mcp_ndjson_response(stdout, expected_id: int, limit: int = 100) 
     return None
 
 
-async def _execute_via_mcp_subprocess(server: dict, tool_name: str, parameters: dict, resolved_env: dict = None) -> dict:
-    """Spawn a temporary MCP server, do the init handshake, call a tool, return the result."""
-    command = server["command"]
-    raw_args = server.get("args", "[]")
-    args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or [])
+async def _execute_via_mcp_subprocess(server_id: str, server: dict, tool_name: str, parameters: dict, resolved_env: dict = None) -> dict:
+    """Execute a tool using a persistent MCP server subprocess. Spawns it if not running."""
+    if server_id not in _mcp_tool_processes:
+        _mcp_tool_processes[server_id] = {
+            "lock": asyncio.Lock(),
+            "process": None,
+            "next_req_id": 2,
+            "stderr_task": None
+        }
 
-    env = {**os.environ}
-    if resolved_env:
-        env.update(resolved_env)
-    else:
-        raw_env = server.get("env", "{}")
-        env_vars = json.loads(raw_env) if isinstance(raw_env, str) else (raw_env or {})
-        for k, v in env_vars.items():
-            if v:
-                env[k] = v
+    state = _mcp_tool_processes[server_id]
+    
+    async with state["lock"]:
+        # Clean up dead process
+        if state["process"] and state["process"].returncode is not None:
+            state["process"] = None
+            if state["stderr_task"]:
+                state["stderr_task"].cancel()
+                state["stderr_task"] = None
 
-    backend_dir = os.path.dirname(os.path.dirname(__file__))
-    process = None
+        # Spawn if necessary
+        if state["process"] is None:
+            command = server["command"]
+            raw_args = server.get("args", "[]")
+            args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or [])
 
-    try:
-        process = await asyncio.create_subprocess_exec(
-            command, *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=backend_dir,
-            env=env,
-        )
+            env = {**os.environ}
+            if resolved_env:
+                env.update(resolved_env)
+            else:
+                raw_env = server.get("env", "{}")
+                env_vars = json.loads(raw_env) if isinstance(raw_env, str) else (raw_env or {})
+                for k, v in env_vars.items():
+                    if v:
+                        env[k] = v
 
-        async def _write_ndjson(msg: dict):
-            process.stdin.write(_encode_mcp_ndjson(msg))
-            await process.stdin.drain()
+            backend_dir = os.path.dirname(os.path.dirname(__file__))
 
-        async def _stderr_snippet() -> str:
             try:
-                data = await asyncio.wait_for(process.stderr.read(4096), timeout=2)
-                return data.decode("utf-8", errors="replace").strip()[:500]
-            except Exception:
-                return ""
+                process = await asyncio.create_subprocess_exec(
+                    command, *args,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=backend_dir,
+                    env=env,
+                )
+            except Exception as e:
+                return {"error": f"Failed to spawn MCP server '{server.get('name', '?')}': {str(e)}"}
 
-        # Give server time to start
-        await asyncio.sleep(1)
+            state["process"] = process
+            state["next_req_id"] = 2
 
-        # 1) initialize (using NDJSON format for FastMCP compatibility)
-        await _write_ndjson(MCP_INIT_REQUEST)
-        init_resp = await asyncio.wait_for(_read_mcp_ndjson_response(process.stdout, 1), timeout=120)
-        if init_resp is None:
-            err = await _stderr_snippet()
-            return {"error": f"MCP server '{server.get('name', '?')}' did not respond to initialize. {err}".strip()}
+            async def _stderr_drain(stderr):
+                try:
+                    while True:
+                        line = await stderr.readline()
+                        if not line:
+                            break
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
 
-        # 2) initialized notification
-        await _write_ndjson(MCP_INITIALIZED_NOTIFICATION)
+            state["stderr_task"] = asyncio.create_task(_stderr_drain(process.stderr))
 
-        # 3) tools/call
-        await _write_ndjson({
+            def _write_universal_sync(msg: dict):
+                process.stdin.write(_encode_mcp_message(msg))
+
+            try:
+                # 1) initialize 
+                _write_universal_sync(MCP_INIT_REQUEST)
+                await process.stdin.drain()
+                init_resp = await asyncio.wait_for(_read_universal_mcp_response(process.stdout, 1), timeout=120)
+                if init_resp is None:
+                    state["process"].kill()
+                    state["process"] = None
+                    return {"error": f"MCP server '{server.get('name', '?')}' failed to initialize."}
+
+                # 2) initialized notification
+                _write_universal_sync(MCP_INITIALIZED_NOTIFICATION)
+                await process.stdin.drain()
+            except asyncio.TimeoutError:
+                state["process"].kill()
+                state["process"] = None
+                return {"error": f"MCP server '{server.get('name', '?')}' timed out during initialization."}
+            except Exception as e:
+                state["process"].kill()
+                state["process"] = None
+                return {"error": f"MCP server setup failed: {str(e)}"}
+            
+            # Brief delay to allow the server to fully stabilize before accepting tools
+            await asyncio.sleep(1)
+
+        # Process is healthy and ready to accept tool calls
+        process = state["process"]
+        req_id = state["next_req_id"]
+        state["next_req_id"] += 1
+
+        call_req = {
             "jsonrpc": "2.0",
-            "id": 2,
+            "id": req_id,
             "method": "tools/call",
             "params": {"name": tool_name, "arguments": parameters},
-        })
-        tool_resp = await asyncio.wait_for(_read_mcp_ndjson_response(process.stdout, 2), timeout=60)
+        }
 
-        if tool_resp and "result" in tool_resp:
-            content = tool_resp["result"].get("content", [])
-            parts = []
-            for item in content:
-                if item.get("type") == "text":
-                    parts.append(item.get("text", ""))
-                else:
-                    parts.append(json.dumps(item))
-            return {"result": "\n".join(parts) if parts else json.dumps(tool_resp["result"])}
-        elif tool_resp and "error" in tool_resp:
-            return {"error": tool_resp["error"].get("message", "MCP tool execution failed")}
-        else:
-            err = await _stderr_snippet()
-            return {"error": f"No response from MCP server. {err}".strip()}
+        try:
+            process.stdin.write(_encode_mcp_message(call_req))
+            await process.stdin.drain()
 
-    except asyncio.TimeoutError:
-        return {"error": f"MCP server '{server.get('name', '?')}' timed out (60s). Ensure required API keys are configured."}
-    except Exception as e:
-        return {"error": f"MCP execution failed: {str(e)}"}
-    finally:
-        if process:
-            try:
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5)
-                except asyncio.TimeoutError:
-                    process.kill()
-            except Exception:
-                pass
+            tool_resp = await asyncio.wait_for(_read_universal_mcp_response(process.stdout, req_id), timeout=300)
+
+            if tool_resp and "result" in tool_resp:
+                content = tool_resp["result"].get("content", [])
+                parts = []
+                for item in content:
+                    if item.get("type") == "text":
+                        parts.append(item.get("text", ""))
+                    else:
+                        parts.append(json.dumps(item))
+                return {"result": "\n".join(parts) if parts else json.dumps(tool_resp["result"])}
+            elif tool_resp and "error" in tool_resp:
+                return {"error": tool_resp["error"].get("message", "MCP tool execution failed")}
+            else:
+                return {"error": "No valid response from MCP server"}
+        except asyncio.TimeoutError:
+            return {"error": "Tool execution timed out."}
+        except Exception as e:
+            # If the pipe is broken or process dies mid-call, clear it to respawn next time
+            state["process"] = None
+            return {"error": f"MCP execution failed: {str(e)}"}
 
 
 # Map of server names that have fast direct Python handlers

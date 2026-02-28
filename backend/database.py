@@ -16,11 +16,11 @@ async def init_db():
     db = await get_db()
     try:
         await db.executescript("""
-            -- ===== Multi-tenancy tables =====
             CREATE TABLE IF NOT EXISTS organizations (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 description TEXT DEFAULT '',
+                owner_email TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -57,6 +57,31 @@ async def init_db():
                 description TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+            
+            CREATE TABLE IF NOT EXISTS organization_members (
+                id TEXT PRIMARY KEY,
+                org_id TEXT NOT NULL,
+                user_email TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'member', -- owner, admin, member, viewer
+                status TEXT NOT NULL DEFAULT 'pending', -- pending, active
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                UNIQUE(org_id, user_email)
+            );
+
+            CREATE TABLE IF NOT EXISTS resource_permissions (
+                id TEXT PRIMARY KEY,
+                org_id TEXT NOT NULL,
+                user_email TEXT NOT NULL,
+                resource_type TEXT NOT NULL, -- agent, tool, workflow, secret, mcp_server
+                resource_id TEXT NOT NULL,
+                permission_level TEXT NOT NULL, -- read, write, execute
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+                UNIQUE(user_email, resource_type, resource_id)
             );
 
             -- ===== Existing tables (with workspace_id) =====
@@ -261,8 +286,8 @@ async def init_db():
 
 
 async def _run_migrations(db):
-    """Add columns for multi-tenancy to existing tables that lack them."""
     migrations = [
+        ("organizations", "owner_email", "TEXT"),
         ("providers", "workspace_id", "TEXT"),
         ("providers", "org_id", "TEXT"),  # Providers are org-scoped
         ("tools", "workspace_id", "TEXT"),
@@ -299,9 +324,32 @@ async def _run_migrations(db):
     cursor = await db.execute("SELECT id FROM organizations WHERE id = ?", (DEFAULT_ORG_ID,))
     if not await cursor.fetchone():
         await db.execute(
-            "INSERT INTO organizations (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (DEFAULT_ORG_ID, "Default Organization", "Auto-created default organization", now, now)
+            "INSERT INTO organizations (id, name, description, owner_email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (DEFAULT_ORG_ID, "Default Organization", "Auto-created default organization", "balasriharsha.ch@gmail.com", now, now)
         )
+    
+    # Backfill ANY existing organizations that are missing an owner_email
+    await db.execute(
+        "UPDATE organizations SET owner_email = ? WHERE owner_email IS NULL",
+        ("balasriharsha.ch@gmail.com",)
+    )
+    
+    # RBAC Backfill: Ensure all org owners exist as active owners in organization_members
+    cursor = await db.execute("SELECT id, owner_email FROM organizations WHERE owner_email IS NOT NULL")
+    orgs = await cursor.fetchall()
+    for org in orgs:
+        org_id = org['id']
+        owner_email = org['owner_email']
+        
+        # Check if owner is already mapped
+        member_cursor = await db.execute("SELECT id FROM organization_members WHERE org_id = ? AND user_email = ?", (org_id, owner_email))
+        if not await member_cursor.fetchone():
+            import uuid
+            member_id = str(uuid.uuid4())
+            await db.execute(
+                "INSERT INTO organization_members (id, org_id, user_email, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (member_id, org_id, owner_email, 'owner', 'active', now, now)
+            )
 
     # Ensure default environment exists
     cursor = await db.execute("SELECT id FROM environments WHERE id = ?", (DEFAULT_ENV_ID,))

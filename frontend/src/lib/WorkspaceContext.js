@@ -1,6 +1,7 @@
 'use client';
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { apiFetch } from './api';
+import { apiFetch, setApiUserEmail } from './api';
+import { useUser } from '@clerk/nextjs';
 
 const WorkspaceContext = createContext(null);
 
@@ -13,24 +14,39 @@ export function WorkspaceProvider({ children }) {
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    // Load orgs on mount
+    const { isLoaded, isSignedIn, user } = useUser();
+
+    // Effect to configure API identity and kick off org load
     useEffect(() => {
-        loadOrgs();
-    }, []);
+        if (isLoaded && isSignedIn && user?.primaryEmailAddress?.emailAddress) {
+            setApiUserEmail(user.primaryEmailAddress.emailAddress);
+            loadOrgs();
+        } else if (isLoaded && !isSignedIn) {
+            // Unauthenticated state
+            setOrgs([]);
+            setLoading(false);
+        }
+    }, [isLoaded, isSignedIn, user]);
+
+    const currentOrg = orgs.find(o => o.id === currentOrgId) || null;
 
     // Load environments when org changes
     useEffect(() => {
-        if (currentOrgId) {
+        if (currentOrgId && currentOrg?.status !== 'pending') {
             loadEnvironments(currentOrgId);
+        } else if (currentOrg?.status === 'pending') {
+            setEnvironments([]);
+            setCurrentEnvId(null);
+            setCurrentWorkspaceId(null);
         }
-    }, [currentOrgId]);
+    }, [currentOrgId, currentOrg?.status]);
 
     // Load workspaces when env changes
     useEffect(() => {
-        if (currentOrgId && currentEnvId) {
+        if (currentOrgId && currentEnvId && currentOrg?.status !== 'pending') {
             loadWorkspaces(currentOrgId, currentEnvId);
         }
-    }, [currentOrgId, currentEnvId]);
+    }, [currentOrgId, currentEnvId, currentOrg?.status]);
 
     // Persist selection to localStorage
     useEffect(() => {
@@ -41,14 +57,37 @@ export function WorkspaceProvider({ children }) {
 
     const loadOrgs = useCallback(async () => {
         try {
-            const data = await apiFetch('/orgs');
+            let data = await apiFetch('/orgs');
+
+            // Auto-provision brand new users
+            if (!data.organizations || data.organizations.length === 0) {
+                console.log("No organizations found. Auto-provisioning Default Organization for new user...");
+                const newOrgData = await apiFetch('/orgs', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        name: "My Workspace",
+                        description: "Auto-created personal workspace"
+                    })
+                });
+                // Fetch the list again now that it's created
+                data = await apiFetch('/orgs');
+
+                setOrgs(data.organizations || []);
+                setCurrentOrgId(newOrgData.id);
+                setCurrentEnvId(newOrgData.default_env_id);
+                setCurrentWorkspaceId(newOrgData.default_workspace_id);
+                return; // Skip normal loading flows
+            }
+
             setOrgs(data.organizations || []);
 
             const savedOrg = localStorage.getItem('agentic_org_id');
             const orgList = data.organizations || [];
+
             if (savedOrg && orgList.find(o => o.id === savedOrg)) {
                 setCurrentOrgId(savedOrg);
             } else if (orgList.length > 0) {
+                // IMPORTANT: If we didn't just auto-provision, grab the first one
                 setCurrentOrgId(orgList[0].id);
             }
         } catch (err) {
@@ -107,7 +146,6 @@ export function WorkspaceProvider({ children }) {
         setCurrentWorkspaceId(wsId);
     }, []);
 
-    const currentOrg = orgs.find(o => o.id === currentOrgId) || null;
     const currentEnv = environments.find(e => e.id === currentEnvId) || null;
     const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId) || null;
 

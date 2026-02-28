@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -31,15 +31,19 @@ class WorkspaceUpdate(BaseModel):
 # ─── Organization CRUD ───
 
 @router.get("")
-async def list_orgs():
+async def list_orgs(x_user_email: str = Header(...)):
     db = await get_db()
     try:
         cursor = await db.execute("""
             SELECT o.*, 
                 (SELECT COUNT(*) FROM environments WHERE org_id = o.id) as environment_count,
-                (SELECT COUNT(*) FROM workspaces WHERE org_id = o.id) as workspace_count
-            FROM organizations o ORDER BY o.created_at DESC
-        """)
+                (SELECT COUNT(*) FROM workspaces WHERE org_id = o.id) as workspace_count,
+                om.role, om.status
+            FROM organizations o
+            JOIN organization_members om ON o.id = om.org_id
+            WHERE om.user_email = ? AND om.status IN ('active', 'pending')
+            ORDER BY o.created_at DESC
+        """, (x_user_email,))
         rows = await cursor.fetchall()
         return {"organizations": [dict(r) for r in rows]}
     finally:
@@ -47,15 +51,21 @@ async def list_orgs():
 
 
 @router.post("")
-async def create_org(org: OrgCreate):
+async def create_org(org: OrgCreate, x_user_email: str = Header(...)):
     db = await get_db()
     try:
         org_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
 
         await db.execute(
-            "INSERT INTO organizations (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (org_id, org.name, org.description, now, now)
+            "INSERT INTO organizations (id, name, description, owner_email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (org_id, org.name, org.description, x_user_email, now, now)
+        )
+
+        member_id = str(uuid.uuid4())
+        await db.execute(
+            "INSERT INTO organization_members (id, org_id, user_email, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (member_id, org_id, x_user_email, 'owner', 'active', now, now)
         )
 
         # Auto-create a default environment

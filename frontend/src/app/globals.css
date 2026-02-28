@@ -1,25 +1,25 @@
 :root {
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #12121a;
-  --bg-tertiary: #1a1a2e;
-  --bg-card: #16162a;
-  --bg-card-hover: #1e1e3a;
-  --bg-input: #1a1a2e;
-  --bg-overlay: rgba(10, 10, 15, 0.9);
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #D4D4D4;
+  --bg-tertiary: #E8E8E8;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F0F0F0;
+  --bg-input: #FFFFFF;
+  --bg-overlay: rgba(255, 255, 255, 0.9);
 
-  --border-color: rgba(255, 255, 255, 0.06);
-  --border-hover: rgba(255, 255, 255, 0.12);
-  --border-active: rgba(124, 58, 237, 0.5);
+  --border-color: #B3B3B3;
+  --border-hover: #D4D4D4;
+  --border-active: #2B2B2B;
 
-  --text-primary: #f0f0f5;
-  --text-secondary: #a0a0b8;
-  --text-tertiary: #6b6b80;
-  --text-accent: #a78bfa;
+  --text-primary: #2B2B2B;
+  --text-secondary: #5A5A5A;
+  --text-tertiary: #B3B3B3;
+  --text-accent: #2B2B2B;
 
-  --accent: #7c3aed;
-  --accent-hover: #6d28d9;
-  --accent-light: rgba(124, 58, 237, 0.15);
-  --accent-glow: rgba(124, 58, 237, 0.3);
+  --accent: #2B2B2B;
+  --accent-hover: #5A5A5A;
+  --accent-light: rgba(43, 43, 43, 0.1);
+  --accent-glow: rgba(43, 43, 43, 0.2);
 
   --success: #10b981;
   --success-bg: rgba(16, 185, 129, 0.12);
@@ -30,9 +30,9 @@
   --info: #3b82f6;
   --info-bg: rgba(59, 130, 246, 0.12);
 
-  --cyan: #06b6d4;
-  --pink: #ec4899;
-  --orange: #f97316;
+  --cyan: #B3B3B3;
+  --pink: #D4D4D4;
+  --orange: #2B2B2B;
   --lime: #84cc16;
 
   --sidebar-width: 260px;
@@ -47,7 +47,7 @@
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 30px rgba(124, 58, 237, 0.15);
+  --shadow-glow: 0 0 30px rgba(115, 65, 40, 0.3);
 
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -705,6 +705,29 @@ body {
   max-width: 400px;
 }
 
+.chat-message .message-actions {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.chat-message:hover .message-actions {
+  opacity: 1;
+}
+
+.chat-input {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  resize: vertical;
+}
+
+.chat-input:focus {
+  outline: none;
+  border-color: var(--info);
+}
+
 /* ========== Code Block ========== */
 .code-block {
   background: var(--bg-primary);
@@ -733,9 +756,17 @@ body {
   color: var(--text-primary);
 }
 
-.markdown-content h1 { font-size: 1.5em; }
-.markdown-content h2 { font-size: 1.3em; }
-.markdown-content h3 { font-size: 1.1em; }
+.markdown-content h1 {
+  font-size: 1.5em;
+}
+
+.markdown-content h2 {
+  font-size: 1.3em;
+}
+
+.markdown-content h3 {
+  font-size: 1.1em;
+}
 
 .markdown-content p {
   margin-bottom: 0.75em;

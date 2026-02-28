@@ -14,6 +14,8 @@ from routes.agents import router as agents_router
 from routes.orgs import router as orgs_router
 from routes.environments import router as environments_router
 from routes.secrets import router as secrets_router
+from routes.members import router as members_router
+from routes.permissions import router as permissions_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -52,6 +54,8 @@ app.include_router(agents_router, prefix="/api/agents", tags=["agents"])
 app.include_router(orgs_router, prefix="/api/orgs", tags=["organizations"])
 app.include_router(environments_router, prefix="/api/orgs", tags=["environments"])
 app.include_router(secrets_router, prefix="/api/secrets", tags=["secrets"])
+app.include_router(members_router, prefix="/api/orgs/{org_id}/members", tags=["members"])
+app.include_router(permissions_router, prefix="/api/permissions", tags=["permissions"])
 
 @app.get("/api/health")
 async def health_check():

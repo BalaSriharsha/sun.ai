@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from database import get_db
+from auth import RequirePermission
 import uuid
 
 router = APIRouter()
@@ -22,7 +23,7 @@ class EnvUpdate(BaseModel):
 # ─── Environment CRUD ───
 
 @router.get("/{org_id}/environments")
-async def list_environments(org_id: str):
+async def list_environments(org_id: str, auth: dict = Depends(RequirePermission())):
     db = await get_db()
     try:
         cursor = await db.execute("""
@@ -37,7 +38,7 @@ async def list_environments(org_id: str):
 
 
 @router.post("/{org_id}/environments")
-async def create_environment(org_id: str, env: EnvCreate):
+async def create_environment(org_id: str, env: EnvCreate, auth: dict = Depends(RequirePermission('admin'))):
     db = await get_db()
     try:
         cursor = await db.execute("SELECT id FROM organizations WHERE id = ?", (org_id,))
@@ -66,7 +67,7 @@ async def create_environment(org_id: str, env: EnvCreate):
 
 
 @router.put("/{org_id}/environments/{env_id}")
-async def update_environment(org_id: str, env_id: str, update: EnvUpdate):
+async def update_environment(org_id: str, env_id: str, update: EnvUpdate, auth: dict = Depends(RequirePermission('admin'))):
     db = await get_db()
     try:
         cursor = await db.execute(
@@ -97,7 +98,7 @@ async def update_environment(org_id: str, env_id: str, update: EnvUpdate):
 
 
 @router.delete("/{org_id}/environments/{env_id}")
-async def delete_environment(org_id: str, env_id: str):
+async def delete_environment(org_id: str, env_id: str, auth: dict = Depends(RequirePermission('admin'))):
     db = await get_db()
     try:
         cursor = await db.execute(

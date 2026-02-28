@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from database import get_db
 from services.agent_service import run_agent, stream_agent
+from auth import verify_workspace_access
 import uuid
 import json
 
@@ -46,8 +47,10 @@ class AgentQueryRequest(BaseModel):
 
 
 @router.get("")
-async def list_agents(workspace_id: str):
+async def list_agents(workspace_id: str, x_user_email: str = Header(...)):
     """List all agents in a workspace."""
+    await verify_workspace_access(workspace_id, x_user_email)
+    
     db = await get_db()
     try:
         cursor = await db.execute(
@@ -76,7 +79,10 @@ async def list_agents(workspace_id: str):
 
 
 @router.post("")
-async def create_agent(agent: AgentCreate):
+async def create_agent(agent: AgentCreate, x_user_email: str = Header(...)):
+    """Create a new agent."""
+    await verify_workspace_access(agent.workspace_id, x_user_email)
+    
     agent_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
     db = await get_db()
@@ -108,7 +114,7 @@ async def create_agent(agent: AgentCreate):
 
 
 @router.get("/{agent_id}")
-async def get_agent(agent_id: str):
+async def get_agent(agent_id: str, x_user_email: str = Header(...)):
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM agents WHERE id = ?", (agent_id,))
@@ -116,6 +122,9 @@ async def get_agent(agent_id: str):
         if not row:
             raise HTTPException(status_code=404, detail="Agent not found")
         a = dict(row)
+        
+        # Verify access
+        await verify_workspace_access(a["workspace_id"], x_user_email)
         a["tools"] = json.loads(a.get("tools", "[]"))
         a["mcp_servers"] = json.loads(a.get("mcp_servers", "[]"))
 
@@ -142,7 +151,7 @@ async def get_agent(agent_id: str):
 
 
 @router.put("/{agent_id}")
-async def update_agent(agent_id: str, update: AgentUpdate):
+async def update_agent(agent_id: str, update: AgentUpdate, x_user_email: str = Header(...)):
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM agents WHERE id = ?", (agent_id,))
@@ -150,6 +159,9 @@ async def update_agent(agent_id: str, update: AgentUpdate):
         if not row:
             raise HTTPException(status_code=404, detail="Agent not found")
         existing = dict(row)
+        
+        # Verify access
+        await verify_workspace_access(existing["workspace_id"], x_user_email)
         now = datetime.utcnow().isoformat()
 
         await db.execute(
@@ -178,12 +190,16 @@ async def update_agent(agent_id: str, update: AgentUpdate):
 
 
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: str):
+async def delete_agent(agent_id: str, x_user_email: str = Header(...)):
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT id FROM agents WHERE id = ?", (agent_id,))
-        if not await cursor.fetchone():
+        cursor = await db.execute("SELECT workspace_id FROM agents WHERE id = ?", (agent_id,))
+        row = await cursor.fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="Agent not found")
+            
+        # Verify access
+        await verify_workspace_access(row["workspace_id"], x_user_email)
         await db.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
         await db.commit()
         return {"deleted": True}
@@ -192,18 +208,85 @@ async def delete_agent(agent_id: str):
 
 
 @router.post("/{agent_id}/query")
-async def query_agent(agent_id: str, req: AgentQueryRequest):
+async def query_agent(agent_id: str, req: AgentQueryRequest, x_user_email: str = Header(...)):
     """Query endpoint — send a message, get an agentic response with tool-calling loop."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM agents WHERE id = ?", (agent_id,))
+        agent_row = await cursor.fetchone()
+        if not agent_row:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        agent = dict(agent_row)
+        
+        # Verify access
+        await verify_workspace_access(agent["workspace_id"], x_user_email)
+        conv_id = req.conversation_id
+        now = datetime.utcnow().isoformat()
+        if not conv_id:
+            conv_id = str(uuid.uuid4())
+            await db.execute(
+                """INSERT INTO conversations (id, workspace_id, title, model_id, provider_id, system_prompt, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (conv_id, agent["workspace_id"], req.query[:50] + "..." if req.query else "Agent Chat",
+                 agent["model_id"], agent["provider_id"], agent.get("system_prompt", ""), now, now)
+            )
+            await db.commit()
+            
+        # Save user message
+        msg_id = str(uuid.uuid4())
+        await db.execute(
+            """INSERT INTO messages (id, conversation_id, role, content, model_id, created_at)
+               VALUES (?, ?, 'user', ?, ?, ?)""",
+            (msg_id, conv_id, req.query, agent["model_id"], now)
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
     if req.stream:
         async def event_stream():
-            async for step in stream_agent(agent_id, req.query, req.conversation_id):
+            full_content = ""
+            async for step in stream_agent(agent_id, req.query, conv_id):
+                if step.get("type") == "content":
+                    full_content = step.get("content", "")
                 yield f"data: {json.dumps(step)}\n\n"
+
+            # Save assistant message
+            if full_content:
+                db2 = await get_db()
+                try:
+                    amsg_id = str(uuid.uuid4())
+                    now2 = datetime.utcnow().isoformat()
+                    await db2.execute(
+                        """INSERT INTO messages (id, conversation_id, role, content, model_id, created_at)
+                           VALUES (?, ?, 'assistant', ?, ?, ?)""",
+                        (amsg_id, conv_id, full_content, agent["model_id"], now2)
+                    )
+                    await db2.commit()
+                finally:
+                    await db2.close()
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
     else:
-        result = await run_agent(agent_id, req.query, req.conversation_id)
+        result = await run_agent(agent_id, req.query, conv_id)
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
+            
+        # Save assistant message
+        db2 = await get_db()
+        try:
+            amsg_id = str(uuid.uuid4())
+            now2 = datetime.utcnow().isoformat()
+            await db2.execute(
+                """INSERT INTO messages (id, conversation_id, role, content, model_id, created_at)
+                   VALUES (?, ?, 'assistant', ?, ?, ?)""",
+                (amsg_id, conv_id, result.get("content", ""), agent["model_id"], now2)
+            )
+            await db2.commit()
+        finally:
+            await db2.close()
+            
+        result["conversation_id"] = conv_id
         return result
 
 
@@ -212,24 +295,21 @@ async def list_agent_conversations(agent_id: str, limit: int = 20):
     """List conversations associated with this agent (via observability logs)."""
     db = await get_db()
     try:
-        # Find conversations that used this agent through observability logs
+        # Find conversations that used this agent through observability logs, MUST actually exist in conversations table
         cursor = await db.execute(
-            """SELECT DISTINCT conversation_id, MAX(created_at) as last_used
-               FROM observability_logs WHERE source = 'agent' AND conversation_id IS NOT NULL
-               GROUP BY conversation_id ORDER BY last_used DESC LIMIT ?""",
+            """SELECT c.*, o.last_used 
+               FROM conversations c
+               JOIN (
+                   SELECT conversation_id, MAX(created_at) as last_used
+                   FROM observability_logs 
+                   WHERE source = 'agent' AND conversation_id IS NOT NULL AND provider_name != 'system'
+                   GROUP BY conversation_id
+               ) o ON c.id = o.conversation_id
+               ORDER BY o.last_used DESC LIMIT ?""",
             (limit,)
         )
         rows = await cursor.fetchall()
-        conversations = []
-        for row in rows:
-            r = dict(row)
-            # Get conversation details if they exist
-            cc = await db.execute("SELECT * FROM conversations WHERE id = ?", (r["conversation_id"],))
-            crow = await cc.fetchone()
-            if crow:
-                conversations.append(dict(crow))
-            else:
-                conversations.append({"id": r["conversation_id"], "last_used": r["last_used"]})
+        conversations = [dict(row) for row in rows]
         return {"conversations": conversations}
     finally:
         await db.close()

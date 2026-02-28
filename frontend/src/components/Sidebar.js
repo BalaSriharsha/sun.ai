@@ -3,10 +3,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
     LayoutDashboard, Cpu, MessageSquare, GitBranch, Wrench,
-    Server, BarChart3, Zap, Bot, Building2, Key, ChevronDown, Layers, BookOpen
+    Server, BarChart3, Zap, Bot, Building2, Key, ChevronDown, Layers, BookOpen, Users
 } from 'lucide-react';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { useState, useRef, useEffect } from 'react';
+import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/nextjs';
 
 const navItems = [
     {
@@ -32,6 +33,7 @@ const navItems = [
     {
         section: 'Configure', items: [
             { href: '/secrets', label: 'Secrets & Variables', icon: Key },
+            { href: '/orgs/members', label: 'Members & Roles', icon: Users },
         ]
     },
     {
@@ -51,7 +53,8 @@ export default function Sidebar() {
     const {
         orgs, environments, workspaces,
         currentOrg, currentEnv, currentWorkspace,
-        switchOrg, switchEnv, switchWorkspace
+        switchOrg, switchEnv, switchWorkspace,
+        loading
     } = useWorkspace();
     const [showSwitcher, setShowSwitcher] = useState(false);
     const switcherRef = useRef(null);
@@ -73,7 +76,7 @@ export default function Sidebar() {
                     <div className="sidebar-logo-icon">
                         <Zap size={20} />
                     </div>
-                    <span className="sidebar-logo-text">AgenticAI</span>
+                    <span className="sidebar-logo-text">Zeus.ai</span>
                 </Link>
             </div>
 
@@ -84,9 +87,12 @@ export default function Sidebar() {
                     onClick={() => setShowSwitcher(!showSwitcher)}
                 >
                     <div className="workspace-switcher-info">
-                        <span className="workspace-switcher-org">{currentOrg?.name || 'Loading...'}</span>
+                        <span className="workspace-switcher-org">
+                            {loading ? 'Loading...' : (currentOrg?.name || 'No Organization')}
+                            {currentOrg?.status === 'pending' && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#f59e0b20', color: '#f59e0b', padding: '2px 4px', borderRadius: '4px' }}>Pending</span>}
+                        </span>
                         <span className="workspace-switcher-ws">
-                            {currentEnv?.name || '—'} / {currentWorkspace?.name || '—'}
+                            {loading ? '—' : (`${currentEnv?.name || '—'} / ${currentWorkspace?.name || '—'}`)}
                         </span>
                     </div>
                     <ChevronDown size={14} className={`workspace-switcher-chevron ${showSwitcher ? 'open' : ''}`} />
@@ -102,9 +108,13 @@ export default function Sidebar() {
                                     key={org.id}
                                     className={`workspace-switcher-option ${org.id === currentOrg?.id ? 'active' : ''}`}
                                     onClick={() => { switchOrg(org.id); }}
+                                    style={org.status === 'pending' ? { opacity: 0.7 } : {}}
                                 >
                                     <Building2 size={14} />
-                                    <span>{org.name}</span>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        {org.name}
+                                        {org.status === 'pending' && <span style={{ fontSize: '10px', background: '#f59e0b20', color: '#f59e0b', padding: '2px 4px', borderRadius: '4px' }}>Pending</span>}
+                                    </span>
                                 </button>
                             ))}
                         </div>
@@ -165,10 +175,18 @@ export default function Sidebar() {
                     </div>
                 ))}
             </nav>
-            <div className="sidebar-footer">
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', padding: '4px 12px' }}>
-                    AgenticAI Platform v2.0
-                </div>
+            <div className="sidebar-footer" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <SignedIn>
+                    <UserButton afterSignOutUrl="/" />
+                    <span style={{ fontSize: '12px', fontWeight: 500 }}>My Account</span>
+                </SignedIn>
+                <SignedOut>
+                    <SignInButton mode="modal">
+                        <button className="btn btn-primary" style={{ width: '100%', fontSize: '13px', padding: '6px 12px' }}>
+                            Sign In
+                        </button>
+                    </SignInButton>
+                </SignedOut>
             </div>
         </aside>
     );

@@ -136,7 +136,27 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
     messages = []
     if agent.get("system_prompt"):
         messages.append({"role": "system", "content": agent["system_prompt"]})
-    messages.append({"role": "user", "content": query})
+
+    # Load history if conversation_id exists
+    if conversation_id:
+        db = await get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT role, content, tool_call_id, tool_calls FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
+                (conversation_id,)
+            )
+            rows = await cursor.fetchall()
+            for r in rows:
+                msg = {"role": r["role"], "content": r["content"] if r["content"] is not None else ""}
+                if r["tool_calls"]:
+                    msg["tool_calls"] = json.loads(r["tool_calls"])
+                if r["tool_call_id"]:
+                    msg["tool_call_id"] = r["tool_call_id"]
+                messages.append(msg)
+        finally:
+            await db.close()
+    else:
+        messages.append({"role": "user", "content": query})
 
     steps = []
     iteration = 0
@@ -278,7 +298,27 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
     messages = []
     if agent.get("system_prompt"):
         messages.append({"role": "system", "content": agent["system_prompt"]})
-    messages.append({"role": "user", "content": query})
+
+    # Load history if conversation_id exists
+    if conversation_id:
+        db = await get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT role, content, tool_call_id, tool_calls FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
+                (conversation_id,)
+            )
+            rows = await cursor.fetchall()
+            for r in rows:
+                msg = {"role": r["role"], "content": r["content"] if r["content"] is not None else ""}
+                if r["tool_calls"]:
+                    msg["tool_calls"] = json.loads(r["tool_calls"])
+                if r["tool_call_id"]:
+                    msg["tool_call_id"] = r["tool_call_id"]
+                messages.append(msg)
+        finally:
+            await db.close()
+    else:
+        messages.append({"role": "user", "content": query})
 
     iteration = 0
     max_iter = agent.get("max_iterations", 10)
@@ -336,10 +376,16 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
                 return
 
         if result.get("tool_calls"):
+            normalized_tcs = []
+            for tc in result["tool_calls"]:
+                ntc = dict(tc)
+                if "type" not in ntc:
+                    ntc["type"] = "function"
+                normalized_tcs.append(ntc)
             assistant_msg = {
                 "role": "assistant",
                 "content": result.get("content", ""),
-                "tool_calls": result["tool_calls"],
+                "tool_calls": normalized_tcs,
             }
             messages.append(assistant_msg)
 

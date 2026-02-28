@@ -1,13 +1,25 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
+let currentUserEmail = null;
+
+export const setApiUserEmail = (email) => {
+    currentUserEmail = email;
+};
+
 export async function apiFetch(path, options = {}) {
     const url = `${API_BASE}${path}`;
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers,
+    };
+
+    if (currentUserEmail) {
+        headers['x-user-email'] = currentUserEmail;
+    }
+
     const config = {
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers,
-        },
         ...options,
+        headers,
     };
 
     const res = await fetch(url, config);
@@ -22,12 +34,18 @@ export async function apiFetch(path, options = {}) {
 
 export function apiStream(path, options = {}) {
     const url = `${API_BASE}${path}`;
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers,
+    };
+
+    if (currentUserEmail) {
+        headers['x-user-email'] = currentUserEmail;
+    }
+
     return fetch(url, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers,
-        },
+        headers,
         ...options,
     });
 }
@@ -65,7 +83,7 @@ export const api = {
     discoverMCPTools: (id, orgId) => apiFetch(`/mcp/${id}/discover${orgId ? `?org_id=${orgId}` : ''}`, { method: 'POST' }),
 
     // Chat
-    getConversations: () => apiFetch('/chat/conversations'),
+    getConversations: (workspaceId) => apiFetch(`/chat/conversations${workspaceId ? `?workspace_id=${workspaceId}` : ''}`),
     createConversation: (data) => apiFetch('/chat/conversations', { method: 'POST', body: JSON.stringify(data) }),
     getConversation: (id) => apiFetch(`/chat/conversations/${id}`),
     deleteConversation: (id) => apiFetch(`/chat/conversations/${id}`, { method: 'DELETE' }),

@@ -2,8 +2,9 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/lib/WorkspaceContext';
-import { Plus, Bot, Play, Trash2, Edit, X, Wrench, Cpu, Send, ChevronDown, ChevronRight, Server } from 'lucide-react';
+import { Plus, Bot, Play, Trash2, Edit, X, Wrench, Cpu, Send, ChevronDown, ChevronRight, Server, Share2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import PermissionsModal from '@/components/PermissionsModal';
 import remarkGfm from 'remark-gfm';
 
 export default function AgentsPage() {
@@ -11,6 +12,7 @@ export default function AgentsPage() {
     const [agents, setAgents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
+    const [sharingAgent, setSharingAgent] = useState(null);
     const [editingAgent, setEditingAgent] = useState(null);
     const [providers, setProviders] = useState([]);
     const [allModels, setAllModels] = useState({});
@@ -20,6 +22,8 @@ export default function AgentsPage() {
     const [testQuery, setTestQuery] = useState('');
     const [testResult, setTestResult] = useState(null);
     const [expandedId, setExpandedId] = useState(null);
+    const [toolsExpanded, setToolsExpanded] = useState(false);
+    const [mcpExpanded, setMcpExpanded] = useState(false);
     const [form, setForm] = useState({
         name: '', description: '', system_prompt: 'You are a helpful AI assistant.',
         provider_id: '', model_id: '', tools: [], mcp_servers: [],
@@ -201,8 +205,9 @@ export default function AgentsPage() {
                                     {agent.status}
                                 </span>
                                 <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
-                                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(agent)}><Edit size={14} /></button>
-                                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleDelete(agent.id)}><Trash2 size={14} /></button>
+                                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setSharingAgent(agent)} title="Share"><Share2 size={14} /></button>
+                                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(agent)} title="Edit"><Edit size={14} /></button>
+                                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleDelete(agent.id)} title="Delete"><Trash2 size={14} /></button>
                                 </div>
                                 {expandedId === agent.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                             </div>
@@ -300,126 +305,157 @@ export default function AgentsPage() {
             {/* Create/Edit Modal */}
             {showModal && (
                 <div className="modal-overlay" onClick={() => setShowModal(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: '90vh', overflowY: 'auto' }}>
+                    <div className="modal" onClick={e => e.stopPropagation()} style={{ width: '90vw', maxWidth: 1200, height: '85vh', maxHeight: 800, display: 'flex', flexDirection: 'column', padding: '24px 32px' }}>
                         <div className="modal-header">
                             <h2 className="modal-title">{editingAgent ? 'Edit Agent' : 'Create Agent'}</h2>
                             <button className="btn btn-ghost btn-icon" onClick={() => setShowModal(false)}><X size={18} /></button>
                         </div>
-                        <form onSubmit={handleSave}>
-                            <div className="grid-2">
-                                <div className="form-group">
-                                    <label className="form-label">Agent Name</label>
-                                    <input className="form-input" required value={form.name}
-                                        onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Research Agent" />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Description</label>
-                                    <input className="form-input" value={form.description}
-                                        onChange={e => setForm({ ...form, description: e.target.value })}
-                                        placeholder="Searches the web and summarizes findings" />
-                                </div>
-                            </div>
+                        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(250px, 300px) 1fr minmax(250px, 300px)', gap: 32, flex: 1, overflowY: 'auto', paddingRight: 8 }}>
 
-                            <div className="grid-2">
-                                <div className="form-group">
-                                    <label className="form-label">Provider</label>
-                                    <select className="form-select" required value={form.provider_id}
-                                        onChange={e => setForm({ ...form, provider_id: e.target.value, model_id: '' })}>
-                                        <option value="">Select Provider</option>
-                                        {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                    </select>
+                                {/* Left Column: Settings */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Agent Name</label>
+                                        <input className="form-input" required value={form.name}
+                                            onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Research Agent" />
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Description</label>
+                                        <input className="form-input" value={form.description}
+                                            onChange={e => setForm({ ...form, description: e.target.value })}
+                                            placeholder="Searches the web and summarizes findings" />
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Provider</label>
+                                        <select className="form-select" required value={form.provider_id}
+                                            onChange={e => setForm({ ...form, provider_id: e.target.value, model_id: '' })}>
+                                            <option value="">Select Provider</option>
+                                            {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Model</label>
+                                        <select className="form-select" required value={form.model_id}
+                                            onChange={e => setForm({ ...form, model_id: e.target.value })}>
+                                            <option value="">Select Model</option>
+                                            {currentModels.map(m => <option key={m.id} value={m.model_id}>{m.model_id}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Temperature</label>
+                                        <input className="form-input" type="number" step="0.1" min="0" max="2"
+                                            value={form.temperature} onChange={e => setForm({ ...form, temperature: parseFloat(e.target.value) })} />
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Max Tokens</label>
+                                        <input className="form-input" type="number" min="1"
+                                            value={form.max_tokens} onChange={e => setForm({ ...form, max_tokens: parseInt(e.target.value) })} />
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Max Iterations</label>
+                                        <input className="form-input" type="number" min="1" max="50"
+                                            value={form.max_iterations} onChange={e => setForm({ ...form, max_iterations: parseInt(e.target.value) })} />
+                                    </div>
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label">Model</label>
-                                    <select className="form-select" required value={form.model_id}
-                                        onChange={e => setForm({ ...form, model_id: e.target.value })}>
-                                        <option value="">Select Model</option>
-                                        {currentModels.map(m => <option key={m.id} value={m.model_id}>{m.model_id}</option>)}
-                                    </select>
-                                </div>
-                            </div>
 
-                            <div className="form-group">
-                                <label className="form-label">Tools ({form.tools.length} selected)</label>
-                                <div style={{
-                                    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6,
-                                    maxHeight: 180, overflowY: 'auto', padding: 8,
-                                    background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)'
-                                }}>
-                                    {tools.map(tool => (
-                                        <label key={tool.id} style={{
-                                            display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-                                            borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13,
-                                            background: form.tools.includes(tool.id) ? 'rgba(124, 58, 237, 0.1)' : 'transparent',
-                                            border: `1px solid ${form.tools.includes(tool.id) ? 'var(--accent)' : 'transparent'}`
-                                        }}>
-                                            <input type="checkbox" checked={form.tools.includes(tool.id)}
-                                                onChange={() => toggleTool(tool.id)} />
-                                            <span>{tool.name}</span>
+                                {/* Center Column: Runbook */}
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', marginBottom: 0 }}>
+                                        <label className="form-label">Runbook</label>
+                                        <textarea className="form-textarea" value={form.system_prompt}
+                                            onChange={e => setForm({ ...form, system_prompt: e.target.value })}
+                                            style={{ flex: 1, resize: 'none', minHeight: 400, fontSize: 13, fontFamily: 'var(--font-mono)' }}
+                                            placeholder="Define the agent's behavior, instructions, and workflow steps..." />
+                                    </div>
+                                </div>
+
+                                {/* Right Column: Tooling */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                    <div className="form-group" style={{ display: 'flex', flexDirection: 'column', marginBottom: 0, flex: toolsExpanded ? 1 : 'none' }}>
+                                        <label className="form-label"
+                                            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '4px 0', userSelect: 'none' }}
+                                            onClick={() => setToolsExpanded(!toolsExpanded)}>
+                                            <span>Tools ({form.tools.length} selected)</span>
+                                            {toolsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                         </label>
-                                    ))}
-                                </div>
-                            </div>
+                                        {toolsExpanded && (
+                                            <div style={{
+                                                display: 'flex', flexDirection: 'column', gap: 6,
+                                                flex: 1, overflowY: 'auto', padding: 8,
+                                                background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)'
+                                            }}>
+                                                {tools.map(tool => (
+                                                    <label key={tool.id} style={{
+                                                        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                                                        borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13,
+                                                        background: form.tools.includes(tool.id) ? 'rgba(124, 58, 237, 0.1)' : 'transparent',
+                                                        border: `1px solid ${form.tools.includes(tool.id) ? 'var(--accent)' : 'transparent'}`
+                                                    }}>
+                                                        <input type="checkbox" checked={form.tools.includes(tool.id)}
+                                                            onChange={() => toggleTool(tool.id)} />
+                                                        <span>{tool.name}</span>
+                                                    </label>
+                                                ))}
+                                                {tools.length === 0 && (
+                                                    <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: 8 }}>No tools available</div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
 
-                            <div className="form-group">
-                                <label className="form-label">MCP Servers ({form.mcp_servers.length} selected)</label>
-                                <div style={{
-                                    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6,
-                                    maxHeight: 180, overflowY: 'auto', padding: 8,
-                                    background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)'
-                                }}>
-                                    {mcpServers.map(server => (
-                                        <label key={server.id} style={{
-                                            display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-                                            borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13,
-                                            background: form.mcp_servers.includes(server.id) ? 'rgba(249, 115, 22, 0.1)' : 'transparent',
-                                            border: `1px solid ${form.mcp_servers.includes(server.id) ? 'var(--orange)' : 'transparent'}`
-                                        }}>
-                                            <input type="checkbox" checked={form.mcp_servers.includes(server.id)}
-                                                onChange={() => toggleMCP(server.id)} />
-                                            <Server size={14} style={{ color: 'var(--orange)' }} />
-                                            <span>{server.name}</span>
+                                    <div className="form-group" style={{ display: 'flex', flexDirection: 'column', marginBottom: 0, flex: mcpExpanded ? 1 : 'none' }}>
+                                        <label className="form-label"
+                                            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '4px 0', userSelect: 'none' }}
+                                            onClick={() => setMcpExpanded(!mcpExpanded)}>
+                                            <span>MCP Servers ({form.mcp_servers.length} selected)</span>
+                                            {mcpExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                         </label>
-                                    ))}
-                                    {mcpServers.length === 0 && (
-                                        <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: 8 }}>No MCP servers configured</div>
-                                    )}
+                                        {mcpExpanded && (
+                                            <div style={{
+                                                display: 'flex', flexDirection: 'column', gap: 6,
+                                                flex: 1, overflowY: 'auto', padding: 8,
+                                                background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)'
+                                            }}>
+                                                {mcpServers.map(server => (
+                                                    <label key={server.id} style={{
+                                                        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                                                        borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13,
+                                                        background: form.mcp_servers.includes(server.id) ? 'rgba(249, 115, 22, 0.1)' : 'transparent',
+                                                        border: `1px solid ${form.mcp_servers.includes(server.id) ? 'var(--orange)' : 'transparent'}`
+                                                    }}>
+                                                        <input type="checkbox" checked={form.mcp_servers.includes(server.id)}
+                                                            onChange={() => toggleMCP(server.id)} />
+                                                        <Server size={14} style={{ color: 'var(--orange)', flexShrink: 0 }} />
+                                                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{server.name}</span>
+                                                    </label>
+                                                ))}
+                                                {mcpServers.length === 0 && (
+                                                    <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: 8 }}>No MCP servers configured</div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="form-group">
-                                <label className="form-label">Runbook</label>
-                                <textarea className="form-textarea" value={form.system_prompt}
-                                    onChange={e => setForm({ ...form, system_prompt: e.target.value })}
-                                    style={{ minHeight: 120 }}
-                                    placeholder="Define the agent's behavior, instructions, and workflow steps..." />
-                            </div>
-
-                            <div className="grid-2" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-                                <div className="form-group">
-                                    <label className="form-label">Temperature</label>
-                                    <input className="form-input" type="number" step="0.1" min="0" max="2"
-                                        value={form.temperature} onChange={e => setForm({ ...form, temperature: parseFloat(e.target.value) })} />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Max Tokens</label>
-                                    <input className="form-input" type="number" min="1"
-                                        value={form.max_tokens} onChange={e => setForm({ ...form, max_tokens: parseInt(e.target.value) })} />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Max Iterations</label>
-                                    <input className="form-input" type="number" min="1" max="50"
-                                        value={form.max_iterations} onChange={e => setForm({ ...form, max_iterations: parseInt(e.target.value) })} />
-                                </div>
-                            </div>
-
-                            <div className="modal-actions">
+                            <div className="modal-actions" style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
                                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
                                 <button type="submit" className="btn btn-primary">{editingAgent ? 'Update' : 'Create'} Agent</button>
                             </div>
                         </form>
                     </div>
                 </div>
+            )}
+
+            {/* Share Modal */}
+            {sharingAgent && (
+                <PermissionsModal
+                    resource_type="agent"
+                    resource_id={sharingAgent.id}
+                    resource_name={sharingAgent.name}
+                    onClose={() => setSharingAgent(null)}
+                />
             )}
         </div>
     );

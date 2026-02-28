@@ -2,7 +2,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { api, apiStream } from '@/lib/api';
 import { useWorkspace } from '@/lib/WorkspaceContext';
-import { Send, Plus, Trash2, Settings, Bot, User, Loader, MessageSquare, GitBranch, Wrench, Zap } from 'lucide-react';
+import { Send, Plus, Trash2, Settings, Bot, User, Loader, MessageSquare, GitBranch, Wrench, Zap, Copy, Edit2, RotateCcw, Check, X } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export default function PlaygroundPage() {
     const { currentWorkspaceId, currentOrgId } = useWorkspace();
@@ -21,6 +23,11 @@ export default function PlaygroundPage() {
     const [showSettings, setShowSettings] = useState(false);
     const messagesEndRef = useRef(null);
 
+    // Message Actions State
+    const [copiedIndex, setCopiedIndex] = useState(null);
+    const [editingIndex, setEditingIndex] = useState(null);
+    const [editContent, setEditContent] = useState('');
+
     // Agent mode state
     const [agents, setAgents] = useState([]);
     const [selectedAgent, setSelectedAgent] = useState('');
@@ -34,12 +41,15 @@ export default function PlaygroundPage() {
 
     useEffect(() => {
         if (currentOrgId) loadProviders();
-        loadConversations();
         if (currentWorkspaceId) {
             loadAgents();
             loadWorkflows();
         }
     }, [currentOrgId, currentWorkspaceId]);
+
+    useEffect(() => {
+        loadConversations();
+    }, [mode, selectedAgent, selectedWorkflow]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -68,7 +78,29 @@ export default function PlaygroundPage() {
     }
 
     async function loadConversations() {
-        try { setConversations((await api.getConversations()).conversations || []); } catch (e) { console.error(e); }
+        try {
+            if (mode === 'chat') {
+                const res = await api.getConversations();
+                setConversations(res.conversations || []);
+            } else if (mode === 'agent') {
+                if (!selectedAgent) { setConversations([]); return; }
+                const res = await api.getAgentConversations(selectedAgent);
+                setConversations(res.conversations || []);
+            } else if (mode === 'workflow') {
+                if (!selectedWorkflow) { setConversations([]); return; }
+                const res = await api.getWorkflowExecutions(selectedWorkflow);
+                const ex = res.executions || [];
+                setConversations(ex.map(e => ({
+                    id: e.id,
+                    title: `Execution ${e.id.substring(0, 6)}`,
+                    status: e.status,
+                    created_at: e.started_at
+                })));
+            }
+        } catch (e) {
+            console.error(e);
+            setConversations([]);
+        }
     }
 
     async function loadAgents() {
@@ -87,12 +119,20 @@ export default function PlaygroundPage() {
 
     function selectConversation(conv) {
         setActiveConv(conv);
-        if (conv.provider_id) setSelectedProvider(conv.provider_id);
-        if (conv.model_id) setSelectedModel(conv.model_id);
-        loadMessages(conv.id);
+        if (mode === 'workflow') {
+            api.getWorkflowExecution(selectedWorkflow, conv.id).then(res => {
+                setWorkflowResult(res);
+            }).catch(e => console.error(e));
+        } else if (mode === 'agent') {
+            loadMessages(conv.id);
+        } else {
+            if (conv.provider_id) setSelectedProvider(conv.provider_id);
+            if (conv.model_id) setSelectedModel(conv.model_id);
+            loadMessages(conv.id);
+        }
     }
 
-    function startNewChat() { setActiveConv(null); setMessages([]); setInput(''); setAgentSteps([]); }
+    function startNewChat() { setActiveConv(null); setMessages([]); setInput(''); setAgentSteps([]); setWorkflowResult(null); }
 
     async function deleteConversation(id, e) {
         e.stopPropagation();
@@ -102,6 +142,63 @@ export default function PlaygroundPage() {
             loadConversations();
         } catch (e) { alert(e.message); }
     }
+
+    // ── Message Actions ──
+    const handleCopy = (content, index) => {
+        navigator.clipboard.writeText(content);
+        setCopiedIndex(index);
+        setTimeout(() => setCopiedIndex(null), 2000);
+    };
+
+    const handleEditStart = (index, content) => {
+        if (sending) return;
+        setEditingIndex(index);
+        setEditContent(content);
+    };
+
+    const handleEditCancel = () => {
+        setEditingIndex(null);
+        setEditContent('');
+    };
+
+    const handleEditSave = async (index) => {
+        if (!editContent.trim() || sending) return;
+        // Trim history up to this message, replace it, and resubmit
+        const newHistory = messages.slice(0, index);
+        setMessages(newHistory);
+        setEditingIndex(null);
+
+        // Temporarily set input and trigger send logic manually to simulate continuing
+        const originalInput = input;
+        setInput(editContent);
+
+        // Wait for state to update then submit
+        setTimeout(() => {
+            if (mode === 'chat') {
+                // To avoid relying on synthetic event state, we duplicate a small portion of handleSend
+                handleChatSendWithInput(editContent, newHistory);
+            } else if (mode === 'agent') {
+                handleAgentSendWithInput(editContent, newHistory);
+            }
+            setInput(originalInput);
+        }, 50);
+    };
+
+    const handleRerun = (index) => {
+        if (sending) return;
+        const msgToRerun = messages[index];
+        // Trim history up to this message and resubmit its content
+        const newHistory = messages.slice(0, index);
+        setMessages(newHistory);
+
+        setTimeout(() => {
+            if (mode === 'chat') {
+                handleChatSendWithInput(msgToRerun.content, newHistory);
+            } else if (mode === 'agent') {
+                handleAgentSendWithInput(msgToRerun.content, newHistory);
+            }
+        }, 50);
+    };
 
     // ── Chat Mode Send ──
     async function handleChatSend() {
@@ -122,6 +219,7 @@ export default function PlaygroundPage() {
                     messages: newMessages.map(m => ({ role: m.role, content: m.content })),
                     system_prompt: systemPrompt || undefined, temperature,
                     conversation_id: activeConv?.id || undefined, stream: true,
+                    workspace_id: currentWorkspaceId,
                 }),
             });
 
@@ -131,11 +229,17 @@ export default function PlaygroundPage() {
             let convId = activeConv?.id;
             setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
+            let buffer = '';
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                const lines = decoder.decode(value, { stream: true }).split('\n').filter(l => l.startsWith('data: '));
-                for (const line of lines) {
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || ''; // keep incomplete line in buffer
+
+                for (let line of lines) {
+                    line = line.trim();
+                    if (!line.startsWith('data: ')) continue;
                     try {
                         const data = JSON.parse(line.slice(6));
                         if (data.type === 'content') {
@@ -149,7 +253,7 @@ export default function PlaygroundPage() {
                                 const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], usage: data }; return u;
                             });
                         }
-                    } catch (e) { /* ignore */ }
+                    } catch (e) { /* ignore incomplete chunks */ }
                 }
             }
             if (convId && !activeConv) setActiveConv({ id: convId });
@@ -163,18 +267,23 @@ export default function PlaygroundPage() {
     // ── Agent Mode Send ──
     async function handleAgentSend() {
         if (!input.trim() || !selectedAgent || sending) return;
-        const userMsg = { role: 'user', content: input.trim() };
-        setMessages(prev => [...prev, userMsg]);
-        setInput('');
+        handleAgentSendWithInput(input, messages);
+    }
+
+    async function handleAgentSendWithInput(textToSend, currentMessages) {
         setSending(true);
+        const userMsg = { role: 'user', content: textToSend };
+        setMessages(prev => [...(currentMessages || prev), userMsg]);
+        setInput('');
         setAgentSteps([]);
 
         try {
+            let reqConvId = activeConv?.id;
             const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
             const response = await fetch(`${API_BASE}/agents/${selectedAgent}/query`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: input.trim(), stream: true }),
+                body: JSON.stringify({ query: textToSend, stream: true, conversation_id: reqConvId, workspace_id: currentWorkspaceId }),
             });
 
             const reader = response.body.getReader();
@@ -182,19 +291,29 @@ export default function PlaygroundPage() {
             let steps = [];
             let finalContent = '';
 
+            let buffer = '';
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                const lines = decoder.decode(value, { stream: true }).split('\n').filter(l => l.startsWith('data: '));
-                for (const line of lines) {
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || ''; // keep incomplete line in buffer
+
+                for (let line of lines) {
+                    line = line.trim();
+                    if (!line.startsWith('data: ')) continue;
                     try {
                         const data = JSON.parse(line.slice(6));
                         steps = [...steps, data];
                         setAgentSteps([...steps]);
                         if (data.type === 'content') finalContent = data.content;
-                    } catch (e) { /* ignore */ }
+                        if (data.type === 'done' && data.conversation_id) reqConvId = data.conversation_id;
+                    } catch (e) { /* ignore incomplete chunks */ }
                 }
             }
+
+            if (reqConvId && !activeConv) setActiveConv({ id: reqConvId });
+            loadConversations();
 
             if (finalContent) {
                 setMessages(prev => [...prev, { role: 'assistant', content: finalContent, isAgent: true }]);
@@ -249,10 +368,12 @@ export default function PlaygroundPage() {
                             onClick={() => selectConversation(conv)}
                             style={{ justifyContent: 'space-between', fontSize: 13 }}>
                             <span className="truncate" style={{ flex: 1 }}>{conv.title}</span>
-                            <button className="btn btn-ghost btn-icon" style={{ padding: 4, opacity: 0.5 }}
-                                onClick={(e) => deleteConversation(conv.id, e)}>
-                                <Trash2 size={12} />
-                            </button>
+                            {mode !== 'workflow' && (
+                                <button className="btn btn-ghost btn-icon" style={{ padding: 4, opacity: 0.5 }}
+                                    onClick={(e) => deleteConversation(conv.id, e)}>
+                                    <Trash2 size={12} />
+                                </button>
+                            )}
                         </div>
                     ))}
                 </div>
@@ -435,18 +556,82 @@ export default function PlaygroundPage() {
                                 </div>
                             )}
                             {messages.map((msg, i) => (
-                                <div key={i} className="chat-message">
+                                <div key={i} className="chat-message" style={{ position: 'relative' }}>
                                     <div className={`chat-message-avatar ${msg.role}`}>
                                         {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
                                     </div>
-                                    <div className="chat-message-content">
+                                    <div className="chat-message-content" style={{ width: '100%' }}>
                                         <div className="chat-message-role" style={{
-                                            color: msg.role === 'user' ? 'var(--info)' : 'var(--text-accent)'
+                                            color: msg.role === 'user' ? 'var(--info)' : 'var(--text-accent)',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
                                         }}>
-                                            {msg.role === 'user' ? 'You' :
-                                                (mode === 'agent' ? (selectedAgentObj?.name || 'Agent') : (selectedModel || 'Assistant'))}
+                                            <span>
+                                                {msg.role === 'user' ? 'You' :
+                                                    (mode === 'agent' ? (selectedAgentObj?.name || 'Agent') : (selectedModel || 'Assistant'))}
+                                            </span>
+
+                                            {/* Action Buttons */}
+                                            <div className="message-actions" style={{ display: 'flex', gap: 6, opacity: 0.7 }}>
+                                                <button
+                                                    onClick={() => handleCopy(msg.content, i)}
+                                                    className="icon-btn"
+                                                    style={{ padding: 4, width: 24, height: 24 }}
+                                                    title="Copy message"
+                                                >
+                                                    {copiedIndex === i ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
+                                                </button>
+
+                                                {msg.role === 'user' && !sending && (
+                                                    <>
+                                                        <button
+                                                            onClick={() => handleEditStart(i, msg.content)}
+                                                            className="icon-btn"
+                                                            style={{ padding: 4, width: 24, height: 24 }}
+                                                            title="Edit and resubmit"
+                                                        >
+                                                            <Edit2 size={14} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleRerun(i)}
+                                                            className="icon-btn"
+                                                            style={{ padding: 4, width: 24, height: 24 }}
+                                                            title="Rerun from here"
+                                                        >
+                                                            <RotateCcw size={14} />
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="chat-message-text">{msg.content}</div>
+
+                                        {editingIndex === i ? (
+                                            <div style={{ marginTop: 8 }}>
+                                                <textarea
+                                                    className="chat-input"
+                                                    style={{ width: '100%', minHeight: 80, padding: 12, borderRadius: 'var(--radius-md)' }}
+                                                    value={editContent}
+                                                    onChange={(e) => setEditContent(e.target.value)}
+                                                    autoFocus
+                                                />
+                                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                                                    <button className="btn btn-secondary" onClick={handleEditCancel}>
+                                                        Cancel
+                                                    </button>
+                                                    <button className="btn btn-primary" onClick={() => handleEditSave(i)}>
+                                                        Save & Submit
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="chat-message-text markdown-content" style={{ fontSize: 13, lineHeight: 1.6 }}>
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                    {msg.content}
+                                                </ReactMarkdown>
+                                            </div>
+                                        )}
+
                                         {msg.usage && (
                                             <div style={{
                                                 marginTop: 8, padding: '6px 10px', background: 'var(--bg-tertiary)',
@@ -475,9 +660,10 @@ export default function PlaygroundPage() {
                                             marginLeft: 52, padding: '6px 12px', marginBottom: 4,
                                             borderRadius: 'var(--radius-sm)', fontSize: 12,
                                             borderLeft: `3px solid ${step.type === 'thinking' ? 'var(--warning)' :
-                                                    step.type === 'tool_call' ? 'var(--cyan)' :
-                                                        step.type === 'tool_result' ? 'var(--success)' :
-                                                            step.type === 'content' ? 'var(--accent)' : 'var(--text-tertiary)'
+                                                step.type === 'tool_call' ? 'var(--cyan)' :
+                                                    step.type === 'tool_result' ? 'var(--success)' :
+                                                        step.type === 'content' ? 'var(--accent)' :
+                                                            step.type.includes('error') ? 'var(--error)' : 'var(--text-tertiary)'
                                                 }`,
                                             background: 'var(--bg-tertiary)',
                                         }}>
@@ -499,8 +685,21 @@ export default function PlaygroundPage() {
                                                 </span>
                                             )}
                                             {step.type === 'content' && (
-                                                <span style={{ color: 'var(--text-primary)' }}>
-                                                    Final answer received
+                                                <div className="markdown-content" style={{ color: 'var(--text-primary)', marginTop: 8, fontSize: 13, lineHeight: 1.6 }}>
+                                                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 4 }}>Final answer received</div>
+                                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                        {step.content}
+                                                    </ReactMarkdown>
+                                                </div>
+                                            )}
+                                            {step.type === 'error' && (
+                                                <span style={{ color: 'var(--error)' }}>
+                                                    <strong>Error:</strong> {step.error}
+                                                </span>
+                                            )}
+                                            {step.type === 'tool_error' && (
+                                                <span style={{ color: 'var(--error)' }}>
+                                                    <strong>Tool Error:</strong> {step.content}
                                                 </span>
                                             )}
                                         </div>

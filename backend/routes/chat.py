@@ -37,6 +37,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
+    workspace_id: Optional[str] = None
     provider_id: str
     model_id: str
     messages: List[ChatMessage]
@@ -48,6 +49,7 @@ class ChatRequest(BaseModel):
 
 class ConversationCreate(BaseModel):
     title: str
+    workspace_id: Optional[str] = None
     model_id: Optional[str] = None
     provider_id: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -94,9 +96,9 @@ async def chat_completions(request: ChatRequest):
             conv_id = str(uuid.uuid4())
             now = datetime.utcnow().isoformat()
             await db.execute(
-                """INSERT INTO conversations (id, title, model_id, provider_id, system_prompt, tools, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (conv_id, request.messages[0].content[:50] + "..." if request.messages else "New Chat",
+                """INSERT INTO conversations (id, workspace_id, title, model_id, provider_id, system_prompt, tools, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (conv_id, request.workspace_id, request.messages[0].content[:50] + "..." if request.messages else "New Chat",
                  request.model_id, request.provider_id, request.system_prompt, json.dumps(request.tools or []), now, now)
             )
             await db.commit()
@@ -192,13 +194,26 @@ async def chat_completions(request: ChatRequest):
 
 
 @router.get("/conversations")
-async def list_conversations():
+async def list_conversations(workspace_id: Optional[str] = None):
     db = await get_db()
     try:
-        cursor = await db.execute("""
+        query = """
             SELECT c.*, (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as message_count
-            FROM conversations c ORDER BY c.updated_at DESC
-        """)
+            FROM conversations c 
+            WHERE c.id NOT IN (
+                SELECT DISTINCT conversation_id 
+                FROM observability_logs 
+                WHERE source = 'agent' AND conversation_id IS NOT NULL
+            )
+        """
+        params = []
+        if workspace_id:
+            query += " AND c.workspace_id = ?"
+            params.append(workspace_id)
+            
+        query += " ORDER BY c.updated_at DESC"
+        
+        cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
         convos = []
         for row in rows:
@@ -218,9 +233,9 @@ async def create_conversation(conv: ConversationCreate):
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO conversations (id, title, model_id, provider_id, system_prompt, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (conv_id, conv.title, conv.model_id, conv.provider_id, conv.system_prompt, now, now)
+            """INSERT INTO conversations (id, workspace_id, title, model_id, provider_id, system_prompt, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (conv_id, conv.workspace_id, conv.title, conv.model_id, conv.provider_id, conv.system_prompt, now, now)
         )
         await db.commit()
         return {"id": conv_id, "title": conv.title, "created_at": now}
