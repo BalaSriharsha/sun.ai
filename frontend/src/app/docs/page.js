@@ -127,7 +127,7 @@ You are a GitHub Assistant that helps manage repositories, issues, and pull requ
                 title: 'Step 1: Create Jira API Token',
                 content: `1. Navigate to https://id.atlassian.com/manage-profile/security/api-tokens
 2. Click **"Create API token"**
-3. Enter a label (e.g., "Zeus.ai Agent")
+3. Enter a label (e.g., "sun.ai Agent")
 4. Click **Create**
 5. Copy the token immediately
 

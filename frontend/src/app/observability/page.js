@@ -5,7 +5,7 @@ import { useWorkspace } from '@/lib/WorkspaceContext';
 import { BarChart3, Clock, DollarSign, Zap, Activity, ArrowLeft, ChevronRight, Filter, RefreshCw } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
-const COLORS = ['#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#f97316', '#3b82f6', '#84cc16'];
+const COLORS = ['#000000', '#FFFFFF'];
 
 export default function ObservabilityPage() {
     const { currentOrgId } = useWorkspace();
@@ -16,6 +16,38 @@ export default function ObservabilityPage() {
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState({ source: '', provider: '', status: '', limit: 50 });
     const [page, setPage] = useState(0);
+    const [dateRange, setDateRange] = useState('7d'); // 'today', '7d', '30d', 'all', 'custom'
+    const [customStart, setCustomStart] = useState('');
+    const [customEnd, setCustomEnd] = useState('');
+
+    useEffect(() => {
+        if (currentOrgId) loadAll();
+    }, [currentOrgId, dateRange, customStart, customEnd]); // reload when range changes
+
+    const getDateRangeParams = () => {
+        if (dateRange === 'all') return {};
+
+        let start = new Date();
+        start.setHours(0, 0, 0, 0);
+        let end = new Date();
+        end.setHours(23, 59, 59, 999);
+
+        if (dateRange === 'today') {
+            // Already set
+        } else if (dateRange === '7d') {
+            start.setDate(start.getDate() - 7);
+        } else if (dateRange === '30d') {
+            start.setDate(start.getDate() - 30);
+        } else if (dateRange === 'custom') {
+            if (!customStart || !customEnd) return {}; // Wait until both are picked
+            start = new Date(customStart);
+            start.setHours(0, 0, 0, 0);
+            end = new Date(customEnd);
+            end.setHours(23, 59, 59, 999);
+        }
+
+        return { start_date: start.toISOString(), end_date: end.toISOString() };
+    };
 
     useEffect(() => {
         if (currentOrgId) loadAll();
@@ -23,16 +55,19 @@ export default function ObservabilityPage() {
 
     async function loadAll() {
         if (!currentOrgId) return;
+        if (dateRange === 'custom' && (!customStart || !customEnd)) return;
+
         setLoading(true);
+        const dateParams = getDateRangeParams();
         try {
             const [statsRes, logsRes, tsRes] = await Promise.all([
-                api.getStats({ org_id: currentOrgId }).catch(() => ({})),
-                api.getLogs({ limit: filter.limit, offset: page * filter.limit, org_id: currentOrgId }).catch(() => ({ logs: [] })),
-                api.getTimeseries({ interval: 'hour', org_id: currentOrgId }).catch(() => ({ timeseries: [] })),
+                api.getStats({ org_id: currentOrgId, ...dateParams }).catch(() => ({})),
+                api.getLogs({ limit: filter.limit, offset: page * filter.limit, org_id: currentOrgId, ...dateParams }).catch(() => ({ logs: [] })),
+                api.getTimeseries({ interval: dateRange === 'today' ? 'hour' : 'day', org_id: currentOrgId, ...dateParams }).catch(() => ({ data: [] })),
             ]);
             setStats(statsRes);
             setLogs(logsRes.logs || []);
-            setTimeseries(tsRes.timeseries || []);
+            setTimeseries(tsRes.data || []);
         } catch (e) { console.error(e); }
         setLoading(false);
     }
@@ -40,7 +75,8 @@ export default function ObservabilityPage() {
     async function loadLogs() {
         if (!currentOrgId) return;
         try {
-            const params = { limit: filter.limit, offset: page * filter.limit, org_id: currentOrgId };
+            const dateParams = getDateRangeParams();
+            const params = { limit: filter.limit, offset: page * filter.limit, org_id: currentOrgId, ...dateParams };
             if (filter.source) params.source = filter.source;
             if (filter.provider) params.provider = filter.provider;
             if (filter.status) params.status = filter.status;
@@ -162,15 +198,37 @@ export default function ObservabilityPage() {
 
     return (
         <div className="animate-fade">
-            <div className="page-header flex items-center justify-between">
+            <header className="page-header">
                 <div>
-                    <h1>Observability</h1>
-                    <p>Monitor AI requests, costs, and performance</p>
+                    <h1 className="page-title">
+                        <BarChart3 className="page-title-icon" />
+                        Observability
+                    </h1>
+                    <p className="page-subtitle">Monitor AI requests, costs, and performance</p>
                 </div>
-                <button className="btn btn-secondary" onClick={loadAll}>
-                    <RefreshCw size={14} /> Refresh
-                </button>
-            </div>
+                <div className="header-actions">
+                    {dateRange === 'custom' && (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <input type="date" className="form-select" style={{ padding: '6px 10px', fontSize: 13, height: 32 }}
+                                value={customStart} onChange={e => setCustomStart(e.target.value)} />
+                            <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>to</span>
+                            <input type="date" className="form-select" style={{ padding: '6px 10px', fontSize: 13, height: 32 }}
+                                value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+                        </div>
+                    )}
+                    <select className="form-select" style={{ padding: '6px 30px 6px 12px', fontSize: 13, height: 32, width: 140 }}
+                        value={dateRange} onChange={e => setDateRange(e.target.value)}>
+                        <option value="today">Today</option>
+                        <option value="7d">Last 7 Days</option>
+                        <option value="30d">Last 30 Days</option>
+                        <option value="all">All Time</option>
+                        <option value="custom">Custom Range...</option>
+                    </select>
+                    <button className="btn btn-secondary" onClick={loadAll} style={{ height: 32 }}>
+                        <RefreshCw size={14} /> Refresh
+                    </button>
+                </div>
+            </header>
 
             {/* Stats */}
             <div className="stats-grid">
@@ -222,13 +280,26 @@ export default function ObservabilityPage() {
                                     </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                                <XAxis dataKey="period" tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }} />
+                                <XAxis
+                                    dataKey="time_bucket"
+                                    tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
+                                    tickFormatter={(val) => {
+                                        if (!val) return '';
+                                        const d = new Date(val);
+                                        return dateRange === 'today' ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString();
+                                    }}
+                                />
                                 <YAxis tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }} />
                                 <Tooltip
                                     contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, fontSize: 12 }}
                                     labelStyle={{ color: 'var(--text-primary)' }}
+                                    labelFormatter={(val) => {
+                                        if (!val) return '';
+                                        const d = new Date(val);
+                                        return d.toLocaleString();
+                                    }}
                                 />
-                                <Area type="monotone" dataKey="request_count" stroke="var(--accent)" fill="url(#gradient1)" strokeWidth={2} />
+                                <Area type="monotone" dataKey="requests" stroke="var(--accent)" fill="url(#gradient1)" strokeWidth={2} />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>
@@ -243,7 +314,7 @@ export default function ObservabilityPage() {
                                     paddingAngle={4} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                                     labelLine={{ stroke: 'var(--text-tertiary)' }}>
                                     {pieData.map((_, i) => (
-                                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                                        <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="#000000" strokeWidth={1} />
                                     ))}
                                 </Pie>
                                 <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, fontSize: 12 }} />

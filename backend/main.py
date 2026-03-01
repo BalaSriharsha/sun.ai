@@ -16,6 +16,8 @@ from routes.environments import router as environments_router
 from routes.secrets import router as secrets_router
 from routes.members import router as members_router
 from routes.permissions import router as permissions_router
+from routes.skills import router as skills_router
+from routes.knowledge import router as knowledge_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -56,6 +58,8 @@ app.include_router(environments_router, prefix="/api/orgs", tags=["environments"
 app.include_router(secrets_router, prefix="/api/secrets", tags=["secrets"])
 app.include_router(members_router, prefix="/api/orgs/{org_id}/members", tags=["members"])
 app.include_router(permissions_router, prefix="/api/permissions", tags=["permissions"])
+app.include_router(skills_router, prefix="/api/skills", tags=["skills"])
+app.include_router(knowledge_router, prefix="/api/knowledge", tags=["knowledge"])
 
 @app.get("/api/health")
 async def health_check():

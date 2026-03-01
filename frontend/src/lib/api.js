@@ -25,8 +25,19 @@ export async function apiFetch(path, options = {}) {
     const res = await fetch(url, config);
 
     if (!res.ok) {
-        const error = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(error.detail || `API Error: ${res.status}`);
+        let error;
+        try {
+            error = await res.json();
+        } catch {
+            error = { detail: res.statusText };
+        }
+
+        let errorMessage = error.detail || `API Error: ${res.status}`;
+        if (typeof errorMessage === 'object') {
+            errorMessage = JSON.stringify(errorMessage);
+        }
+
+        throw new Error(errorMessage);
     }
 
     return res.json();
@@ -125,4 +136,23 @@ export const api = {
 
     // Workflow Query
     queryWorkflow: (id, data) => apiFetch(`/workflows/${id}/query`, { method: 'POST', body: JSON.stringify(data) }),
+
+    // Skills (workspace-scoped)
+    getSkills: (workspaceId) => apiFetch(`/skills?workspace_id=${workspaceId}`),
+    createSkill: (data) => apiFetch('/skills', { method: 'POST', body: JSON.stringify(data) }),
+    getSkill: (id) => apiFetch(`/skills/${id}`),
+    updateSkill: (id, data) => apiFetch(`/skills/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteSkill: (id) => apiFetch(`/skills/${id}`, { method: 'DELETE' }),
+
+    // Knowledge (workspace-scoped)
+    getKnowledgeBases: (workspaceId) => apiFetch(`/knowledge?workspace_id=${workspaceId}`),
+    createKnowledgeBase: (data) => apiFetch('/knowledge', { method: 'POST', body: JSON.stringify(data) }),
+    getKnowledgeBase: (id) => apiFetch(`/knowledge/${id}`),
+    updateKnowledgeBase: (id, data) => apiFetch(`/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteKnowledgeBase: (id) => apiFetch(`/knowledge/${id}`, { method: 'DELETE' }),
+
+    // Knowledge Documents
+    getDocuments: (kbId) => apiFetch(`/knowledge/${kbId}/documents`),
+    createDocument: (kbId, data) => apiFetch(`/knowledge/${kbId}/documents`, { method: 'POST', body: JSON.stringify(data) }),
+    deleteDocument: (kbId, docId) => apiFetch(`/knowledge/${kbId}/documents/${docId}`, { method: 'DELETE' }),
 };

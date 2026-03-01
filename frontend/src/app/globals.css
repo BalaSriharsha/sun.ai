@@ -1,53 +1,53 @@
 :root {
   --bg-primary: #FFFFFF;
-  --bg-secondary: #D4D4D4;
-  --bg-tertiary: #E8E8E8;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #FFFFFF;
   --bg-card: #FFFFFF;
-  --bg-card-hover: #F0F0F0;
+  --bg-card-hover: #000000;
   --bg-input: #FFFFFF;
   --bg-overlay: rgba(255, 255, 255, 0.9);
 
-  --border-color: #B3B3B3;
-  --border-hover: #D4D4D4;
-  --border-active: #2B2B2B;
+  --border-color: #000000;
+  --border-hover: #000000;
+  --border-active: #000000;
 
-  --text-primary: #2B2B2B;
-  --text-secondary: #5A5A5A;
-  --text-tertiary: #B3B3B3;
-  --text-accent: #2B2B2B;
+  --text-primary: #000000;
+  --text-secondary: #000000;
+  --text-tertiary: #000000;
+  --text-accent: #000000;
 
-  --accent: #2B2B2B;
-  --accent-hover: #5A5A5A;
-  --accent-light: rgba(43, 43, 43, 0.1);
-  --accent-glow: rgba(43, 43, 43, 0.2);
+  --accent: #000000;
+  --accent-hover: #000000;
+  --accent-light: #FFFFFF;
+  --accent-glow: transparent;
 
-  --success: #10b981;
-  --success-bg: rgba(16, 185, 129, 0.12);
-  --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.12);
-  --error: #ef4444;
-  --error-bg: rgba(239, 68, 68, 0.12);
-  --info: #3b82f6;
-  --info-bg: rgba(59, 130, 246, 0.12);
+  --success: #000000;
+  --success-bg: #FFFFFF;
+  --warning: #000000;
+  --warning-bg: #FFFFFF;
+  --error: #000000;
+  --error-bg: #FFFFFF;
+  --info: #000000;
+  --info-bg: #FFFFFF;
 
-  --cyan: #B3B3B3;
-  --pink: #D4D4D4;
-  --orange: #2B2B2B;
-  --lime: #84cc16;
+  --cyan: #000000;
+  --pink: #000000;
+  --orange: #000000;
+  --lime: #000000;
 
   --sidebar-width: 260px;
   --sidebar-collapsed: 72px;
   --header-height: 64px;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
 
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 30px rgba(115, 65, 40, 0.3);
+  --shadow-sm: 2px 2px 0px #000000;
+  --shadow-md: 4px 4px 0px #000000;
+  --shadow-lg: 8px 8px 0px #000000;
+  --shadow-glow: none;
 
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -55,6 +55,59 @@
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
   --transition-slow: 400ms ease;
+}
+
+[data-theme='dark'] {
+  --bg-primary: #000000;
+  --bg-secondary: #000000;
+  --bg-tertiary: #000000;
+  --bg-card: #000000;
+  --bg-card-hover: #FFFFFF;
+  --bg-input: #000000;
+  --bg-overlay: rgba(0, 0, 0, 0.9);
+
+  --border-color: #FFFFFF;
+  --border-hover: #FFFFFF;
+  --border-active: #FFFFFF;
+
+  --text-primary: #FFFFFF;
+  --text-secondary: #FFFFFF;
+  --text-tertiary: #FFFFFF;
+  --text-accent: #FFFFFF;
+
+  --accent: #FFFFFF;
+  --accent-hover: #FFFFFF;
+  --accent-light: #000000;
+
+  --success: #FFFFFF;
+  --success-bg: #000000;
+  --warning: #FFFFFF;
+  --warning-bg: #000000;
+  --error: #FFFFFF;
+  --error-bg: #000000;
+  --info: #FFFFFF;
+  --info-bg: #000000;
+
+  --cyan: #FFFFFF;
+  --pink: #FFFFFF;
+  --orange: #FFFFFF;
+  --lime: #FFFFFF;
+
+  --shadow-sm: 2px 2px 0px #FFFFFF;
+  --shadow-md: 4px 4px 0px #FFFFFF;
+  --shadow-lg: 8px 8px 0px #FFFFFF;
+
+  .workspace-switcher-btn {
+    background: rgba(0, 0, 0, 0.7);
+  }
+
+  .workspace-switcher-btn:hover {
+    background: rgba(0, 0, 0, 1);
+  }
+
+  .workspace-switcher-dropdown {
+    background: rgba(0, 0, 0, 0.85);
+  }
 }
 
 * {
@@ -179,7 +232,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 6px 12px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   text-decoration: none;
@@ -196,9 +249,10 @@ body {
 }
 
 .sidebar-link.active {
-  background: var(--accent-light);
-  color: var(--text-accent);
-  border-color: var(--border-active);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  border-color: var(--text-primary);
+  box-shadow: 2px 2px 0px var(--border-color);
 }
 
 .sidebar-link svg {
@@ -225,8 +279,11 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 10px 12px;
-  background: var(--bg-tertiary);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border-color);
+  box-shadow: 3px 3px 0px var(--border-color);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -234,8 +291,9 @@ body {
 }
 
 .workspace-switcher-btn:hover {
-  border-color: var(--accent);
-  background: var(--bg-secondary);
+  background: rgba(255, 255, 255, 1);
+  box-shadow: 4px 4px 0px var(--border-color);
+  transform: translateY(-1px);
 }
 
 .workspace-switcher-info {
@@ -277,13 +335,15 @@ body {
 
 .workspace-switcher-dropdown {
   position: absolute;
-  top: calc(100% + 2px);
+  top: calc(100% + 6px);
   left: 10px;
   right: 10px;
-  background: var(--bg-secondary);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 6px 6px 0px var(--border-color);
   z-index: 200;
   padding: 6px;
   max-height: 300px;
@@ -326,8 +386,9 @@ body {
 }
 
 .workspace-switcher-option.active {
-  background: var(--accent-light);
-  color: var(--text-accent);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  box-shadow: 2px 2px 0px var(--border-color);
 }
 
 .workspace-switcher-divider {
@@ -337,7 +398,17 @@ body {
 }
 
 .page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   margin-bottom: 28px;
+  gap: 20px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .page-header h1 {
@@ -563,6 +634,7 @@ body {
   gap: 4px;
   padding: 3px 10px;
   border-radius: 20px;
+  border: 1px solid var(--border-color);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -570,28 +642,33 @@ body {
 }
 
 .badge-success {
-  background: var(--success-bg);
-  color: var(--success);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
 }
 
 .badge-warning {
-  background: var(--warning-bg);
-  color: var(--warning);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
 }
 
 .badge-error {
-  background: var(--error-bg);
-  color: var(--error);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
 }
 
 .badge-info {
-  background: var(--info-bg);
-  color: var(--info);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
 }
 
 .badge-neutral {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
+  border-color: var(--border-color);
 }
 
 /* ========== Table ========== */
@@ -2274,7 +2351,7 @@ body {
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-secondary);
   font-size: 13px;
@@ -2287,11 +2364,13 @@ body {
 .scope-selector-btn:hover {
   color: var(--text-primary);
   background: var(--bg-tertiary);
+  border-color: var(--border-color);
 }
 
 .scope-selector-btn.active {
-  background: var(--accent-light);
-  color: var(--text-accent);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  box-shadow: 2px 2px 0px var(--border-color);
 }
 
 /* ========== Secrets Page ========== */
@@ -2311,7 +2390,7 @@ body {
   align-items: center;
   gap: 8px;
   padding: 10px 20px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-secondary);
   font-size: 14px;
@@ -2323,11 +2402,14 @@ body {
 
 .secrets-tab:hover {
   color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
 }
 
 .secrets-tab.active {
-  background: var(--accent-light);
-  color: var(--text-accent);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  box-shadow: 2px 2px 0px var(--border-color);
 }
 
 .secrets-tab-count {
@@ -2339,8 +2421,8 @@ body {
 }
 
 .secrets-tab.active .secrets-tab-count {
-  background: var(--accent);
-  color: white;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .secrets-table-wrap {
@@ -2491,4 +2573,57 @@ body {
 .secret-actions {
   display: flex;
   gap: 4px;
+}
+
+/* ========== Utilities ========== */
+.animate-fade {
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.flex {
+  display: flex;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.gap-2 {
+  gap: 8px;
+}
+
+.gap-4 {
+  gap: 16px;
+}
+
+.text-sm {
+  font-size: 14px;
+}
+
+.text-xs {
+  font-size: 12px;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.w-full {
+  width: 100%;
 }

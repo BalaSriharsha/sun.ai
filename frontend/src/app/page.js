@@ -43,30 +43,35 @@ export default function DashboardPage() {
 
   return (
     <div className="animate-fade">
-      <div className="page-header">
-        <h1>Dashboard</h1>
-        <p>Overview of your AgenticAI Platform</p>
-      </div>
+      <header className="page-header">
+        <div>
+          <h1 className="page-title">
+            <Activity className="page-title-icon" />
+            Dashboard
+          </h1>
+          <p className="page-subtitle">Overview of your AgenticAI Platform</p>
+        </div>
+      </header>
 
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-label">Active Providers</div>
-          <div className="stat-value" style={{ color: 'var(--accent)' }}>{loading ? '—' : activeProviders}</div>
+          <div className="stat-value">{loading ? '—' : activeProviders}</div>
           <div className="stat-change">{totalModels} models discovered</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Requests</div>
-          <div className="stat-value" style={{ color: 'var(--cyan)' }}>{loading ? '—' : (stats?.total_requests || 0)}</div>
+          <div className="stat-value">{loading ? '—' : (stats?.total_requests || 0)}</div>
           <div className="stat-change">{stats?.success_count || 0} successful</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Cost</div>
-          <div className="stat-value" style={{ color: 'var(--success)' }}>${loading ? '—' : (stats?.total_cost || 0).toFixed(4)}</div>
+          <div className="stat-value">${loading ? '—' : (stats?.total_cost || 0).toFixed(4)}</div>
           <div className="stat-change">{(stats?.total_tokens || 0).toLocaleString()} total tokens</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Avg Latency</div>
-          <div className="stat-value" style={{ color: 'var(--warning)' }}>{loading ? '—' : Math.round(stats?.avg_latency_ms || 0)}ms</div>
+          <div className="stat-value">{loading ? '—' : Math.round(stats?.avg_latency_ms || 0)}ms</div>
           <div className="stat-change">TTFB: {Math.round(stats?.avg_ttfb_ms || 0)}ms</div>
         </div>
       </div>
@@ -90,14 +95,13 @@ export default function DashboardPage() {
                 <div key={p.id} className="provider-card" style={{ padding: 14 }}>
                   <div className="provider-icon" style={{
                     width: 36, height: 36,
-                    background: p.type === 'openai' ? 'rgba(16, 185, 129, 0.12)' :
-                      p.type === 'anthropic' ? 'rgba(249, 115, 22, 0.12)' :
-                        p.type === 'google' ? 'rgba(59, 130, 246, 0.12)' :
-                          'rgba(124, 58, 237, 0.12)',
-                    color: p.type === 'openai' ? 'var(--success)' :
-                      p.type === 'anthropic' ? 'var(--orange)' :
-                        p.type === 'google' ? 'var(--info)' :
-                          'var(--accent)',
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 'var(--radius-md)',
                     fontSize: 13
                   }}>
                     {p.type.charAt(0).toUpperCase()}
@@ -161,15 +165,15 @@ export default function DashboardPage() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
           {[
-            { href: '/providers', icon: Cpu, label: 'Add Provider', desc: 'Connect an AI provider', color: 'var(--accent)' },
-            { href: '/playground', icon: MessageSquare, label: 'Chat', desc: 'Open chat playground', color: 'var(--cyan)' },
-            { href: '/workflows', icon: GitBranch, label: 'New Workflow', desc: 'Create a workflow', color: 'var(--success)' },
-            { href: '/runbooks', icon: Zap, label: 'New Runbook', desc: 'Write a runbook', color: 'var(--orange)' },
-            { href: '/tools', icon: Wrench, label: 'Add Tool', desc: 'Create custom tool', color: 'var(--pink)' },
-            { href: '/observability', icon: BarChart3, label: 'Analytics', desc: 'View metrics', color: 'var(--warning)' },
+            { href: '/providers', icon: Cpu, label: 'Add Provider', desc: 'Connect an AI provider' },
+            { href: '/playground', icon: MessageSquare, label: 'Chat', desc: 'Open chat playground' },
+            { href: '/workflows', icon: GitBranch, label: 'New Workflow', desc: 'Create a automation' },
+            { href: '/tools', icon: Wrench, label: 'Add Tool', desc: 'Create custom tool' },
+            { href: '/knowledge', icon: Server, label: 'Knowledge', desc: 'Manage your data' },
+            { href: '/observability', icon: BarChart3, label: 'Analytics', desc: 'View metrics' },
           ].map(action => (
             <Link key={action.href} href={action.href} className="tool-card" style={{ textDecoration: 'none' }}>
-              <div className="tool-card-icon" style={{ background: `${action.color}20`, color: action.color }}>
+              <div className="tool-card-icon" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}>
                 <action.icon size={20} />
               </div>
               <h3>{action.label}</h3>

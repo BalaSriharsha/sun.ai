@@ -2,19 +2,19 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/lib/WorkspaceContext';
-import { Plus, RefreshCw, Trash2, CheckCircle, XCircle, ChevronDown, ChevronRight, Eye } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, CheckCircle, XCircle, ChevronDown, ChevronRight, Eye, Cpu } from 'lucide-react';
 
 const PROVIDER_TYPES = [
-    { value: 'openai', label: 'OpenAI', color: '#10b981' },
-    { value: 'anthropic', label: 'Anthropic', color: '#f97316' },
-    { value: 'google', label: 'Google (Gemini)', color: '#3b82f6' },
-    { value: 'groq', label: 'Groq', color: '#ec4899' },
-    { value: 'mistral', label: 'Mistral', color: '#f59e0b' },
-    { value: 'azure', label: 'Azure OpenAI', color: '#0078d4' },
-    { value: 'bedrock', label: 'AWS Bedrock', color: '#ff9900' },
-    { value: 'sarvam', label: 'Sarvam AI', color: '#6d28d9' },
-    { value: 'ollama', label: 'Ollama (Local)', color: '#8b5cf6' },
-    { value: 'openrouter', label: 'OpenRouter', color: '#06b6d4' },
+    { value: 'openai', label: 'OpenAI', color: '#000000' },
+    { value: 'anthropic', label: 'Anthropic', color: '#000000' },
+    { value: 'google', label: 'Google (Gemini)', color: '#000000' },
+    { value: 'groq', label: 'Groq', color: '#000000' },
+    { value: 'mistral', label: 'Mistral', color: '#000000' },
+    { value: 'azure', label: 'Azure OpenAI', color: '#000000' },
+    { value: 'bedrock', label: 'AWS Bedrock', color: '#000000' },
+    { value: 'sarvam', label: 'Sarvam AI', color: '#000000' },
+    { value: 'ollama', label: 'Ollama (Local)', color: '#000000' },
+    { value: 'openrouter', label: 'OpenRouter', color: '#000000' },
 ];
 
 export default function ProvidersPage() {
@@ -103,19 +103,27 @@ export default function ProvidersPage() {
         }
     }
 
-    const getProviderColor = (type) => PROVIDER_TYPES.find(p => p.value === type)?.color || '#7c3aed';
+    const getProviderColor = (type) => PROVIDER_TYPES.find(p => p.value === type)?.color || '#000000';
 
     return (
         <div className="animate-fade">
-            <div className="page-header flex items-center justify-between">
+            <header className="page-header">
                 <div>
-                    <h1>AI Providers</h1>
-                    <p>Manage AI providers and discover available models</p>
+                    <h1 className="page-title">
+                        <Cpu className="page-title-icon" />
+                        AI Providers
+                    </h1>
+                    <p className="page-subtitle">Manage AI providers and discover available models</p>
                 </div>
-                <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-                    <Plus size={16} /> Add Provider
-                </button>
-            </div>
+                <div className="header-actions">
+                    <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+                        <Plus size={16} /> Add Provider
+                    </button>
+                    <button className="btn btn-secondary btn-icon" onClick={loadProviders} title="Refresh All">
+                        <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                    </button>
+                </div>
+            </header>
 
             {loading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>

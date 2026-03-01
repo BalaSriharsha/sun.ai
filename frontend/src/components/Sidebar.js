@@ -3,16 +3,19 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
     LayoutDashboard, Cpu, MessageSquare, GitBranch, Wrench,
-    Server, BarChart3, Zap, Bot, Building2, Key, ChevronDown, Layers, BookOpen, Users
+    Server, BarChart3, Zap, Bot, Building2, Key, ChevronDown, Layers, BookOpen, Users, Sun, Moon,
+    GraduationCap, Library, Compass
 } from 'lucide-react';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { useState, useRef, useEffect } from 'react';
 import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/nextjs';
+import { useTheme } from 'next-themes';
 
 const navItems = [
     {
         section: 'Overview', items: [
             { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+            { href: '/discover', label: 'Discover', icon: Compass },
             { href: '/orgs', label: 'Organizations', icon: Building2 },
         ]
     },
@@ -20,6 +23,8 @@ const navItems = [
         section: 'Build', items: [
             { href: '/providers', label: 'AI Providers', icon: Cpu },
             { href: '/agents', label: 'Agents', icon: Bot },
+            { href: '/skills', label: 'Skills', icon: GraduationCap },
+            { href: '/knowledge', label: 'Knowledge', icon: Library },
             { href: '/playground', label: 'Playground', icon: MessageSquare },
             { href: '/workflows', label: 'Workflows', icon: GitBranch },
         ]
@@ -32,7 +37,6 @@ const navItems = [
     },
     {
         section: 'Configure', items: [
-            { href: '/secrets', label: 'Secrets & Variables', icon: Key },
             { href: '/orgs/members', label: 'Members & Roles', icon: Users },
         ]
     },
@@ -50,6 +54,8 @@ const navItems = [
 
 export default function Sidebar() {
     const pathname = usePathname();
+    const { theme, setTheme } = useTheme();
+    const [mounted, setMounted] = useState(false);
     const {
         orgs, environments, workspaces,
         currentOrg, currentEnv, currentWorkspace,
@@ -60,6 +66,7 @@ export default function Sidebar() {
     const switcherRef = useRef(null);
 
     useEffect(() => {
+        setMounted(true);
         const handleClick = (e) => {
             if (switcherRef.current && !switcherRef.current.contains(e.target)) {
                 setShowSwitcher(false);
@@ -73,10 +80,10 @@ export default function Sidebar() {
         <aside className="sidebar">
             <div className="sidebar-header">
                 <Link href="/" className="sidebar-logo">
-                    <div className="sidebar-logo-icon">
-                        <Zap size={20} />
+                    <div className="sidebar-logo-icon" style={{ overflow: 'hidden' }}>
+                        <img src="/logo.png" alt="sun.ai Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     </div>
-                    <span className="sidebar-logo-text">Zeus.ai</span>
+                    <span className="sidebar-logo-text">sun.ai</span>
                 </Link>
             </div>
 
@@ -89,7 +96,7 @@ export default function Sidebar() {
                     <div className="workspace-switcher-info">
                         <span className="workspace-switcher-org">
                             {loading ? 'Loading...' : (currentOrg?.name || 'No Organization')}
-                            {currentOrg?.status === 'pending' && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#f59e0b20', color: '#f59e0b', padding: '2px 4px', borderRadius: '4px' }}>Pending</span>}
+                            {currentOrg?.status === 'pending' && <span style={{ marginLeft: '6px', fontSize: '10px', border: '1px solid var(--border-color)', padding: '2px 4px', borderRadius: '4px' }}>Pending</span>}
                         </span>
                         <span className="workspace-switcher-ws">
                             {loading ? '—' : (`${currentEnv?.name || '—'} / ${currentWorkspace?.name || '—'}`)}
@@ -113,7 +120,7 @@ export default function Sidebar() {
                                     <Building2 size={14} />
                                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                         {org.name}
-                                        {org.status === 'pending' && <span style={{ fontSize: '10px', background: '#f59e0b20', color: '#f59e0b', padding: '2px 4px', borderRadius: '4px' }}>Pending</span>}
+                                        {org.status === 'pending' && <span style={{ fontSize: '10px', border: '1px solid var(--border-color)', padding: '2px 4px', borderRadius: '4px' }}>Pending</span>}
                                     </span>
                                 </button>
                             ))}
@@ -175,18 +182,32 @@ export default function Sidebar() {
                     </div>
                 ))}
             </nav>
-            <div className="sidebar-footer" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <SignedIn>
-                    <UserButton afterSignOutUrl="/" />
-                    <span style={{ fontSize: '12px', fontWeight: 500 }}>My Account</span>
-                </SignedIn>
-                <SignedOut>
-                    <SignInButton mode="modal">
-                        <button className="btn btn-primary" style={{ width: '100%', fontSize: '13px', padding: '6px 12px' }}>
-                            Sign In
-                        </button>
-                    </SignInButton>
-                </SignedOut>
+            <div className="sidebar-footer" style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {mounted && (
+                    <button
+                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                        className="sidebar-link"
+                        style={{ width: '100%', justifyContent: 'flex-start', background: 'transparent' }}
+                    >
+                        {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+                        <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+                    </button>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <SignedIn>
+                        <Link href="/profile" className="sidebar-link" style={{ width: '100%', justifyContent: 'flex-start', background: 'transparent' }}>
+                            <Users size={18} />
+                            <span>My Profile</span>
+                        </Link>
+                    </SignedIn>
+                    <SignedOut>
+                        <SignInButton>
+                            <button className="btn btn-primary" style={{ width: '100%', fontSize: '13px', padding: '6px 12px' }}>
+                                Sign In
+                            </button>
+                        </SignInButton>
+                    </SignedOut>
+                </div>
             </div>
         </aside>
     );

@@ -113,19 +113,22 @@ export default function SecretsPage() {
 
     return (
         <div className="page-container">
-            <div className="page-header">
-                <div className="page-header-top">
-                    <div>
-                        <h1>Secrets & Variables</h1>
-                        <p className="page-subtitle">
-                            Managing at <strong>{scopeLevel}</strong> level: <strong>{getScopeName()}</strong>
-                        </p>
-                    </div>
+            <header className="page-header">
+                <div>
+                    <h1 className="page-title">
+                        <Lock className="page-title-icon" />
+                        Secrets & Variables
+                    </h1>
+                    <p className="page-subtitle">
+                        Managing at <strong>{scopeLevel}</strong> level: <strong>{getScopeName()}</strong>
+                    </p>
+                </div>
+                <div className="header-actions">
                     <button className="btn btn-primary" onClick={() => openCreate(activeTab)}>
                         <Plus size={16} /> Add {activeTab === 'secret' ? 'Secret' : 'Variable'}
                     </button>
                 </div>
-            </div>
+            </header>
 
             {/* Scope Selector */}
             <div className="scope-selector">

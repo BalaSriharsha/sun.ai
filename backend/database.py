@@ -1,21 +1,146 @@
 import aiosqlite
 import os
 import json
+import logging
 from datetime import datetime
+from dotenv import load_dotenv
+from databases import Database
+
+load_dotenv()
+
+CURRENT_DATABASE = os.environ.get("CURRENT_DATABASE", "local")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "agentic_platform.db")
+SQLITE_URL = f"sqlite:///{DB_PATH}"
+
+_db_instance = None
+_db_adapter = None
+_aiosqlite_conn = None  # We still need this for raw sqlite operations where databases package fails
+
+logger = logging.getLogger(__name__)
+
+class DBAdapterCursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def fetchall(self):
+        return self._rows
+
+    async def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    @property
+    def lastrowid(self):
+        return None
+
+class DBAdapter:
+    def __init__(self, db):
+        self.db = db
+
+    async def execute(self, query: str, params: tuple = None):
+        qw = query.strip().upper()
+        if qw.startswith("SELECT") or "RETURNING" in qw or "PRAGMA" in qw:
+            rows = await execute_query(self.db, query, params, fetch="all")
+            return DBAdapterCursor(rows)
+        else:
+            await execute_query(self.db, query, params, fetch="execute")
+            return DBAdapterCursor([])
+
+    async def executemany(self, query: str, params_list: list):
+        for params in params_list:
+            await execute_query(self.db, query, params, fetch="execute")
+
+    async def commit(self):
+        pass
+
+    async def close(self):
+        pass
 
 async def get_db():
-    db = await aiosqlite.connect(DB_PATH)
-    db.row_factory = aiosqlite.Row
-    await db.execute("PRAGMA journal_mode=WAL")
-    await db.execute("PRAGMA foreign_keys=ON")
-    return db
+    global _db_instance, _db_adapter, _aiosqlite_conn
+    
+    if _db_adapter is not None:
+        return _db_adapter
+        
+    if CURRENT_DATABASE == "postgres":
+        try:
+            _db_instance = Database(DATABASE_URL)
+            await _db_instance.connect()
+            logger.info("Connected to PostgreSQL")
+        except Exception as e:
+            logger.warning(f"PostgreSQL connection failed: {e}. Falling back to SQLite.")
+            _db_instance = None
+            
+    if _db_instance is None:
+        _db_instance = Database(SQLITE_URL)
+        await _db_instance.connect()
+        
+        # We need raw aiosqlite for schema migrations (executescript doesn't exist in databases)
+        _aiosqlite_conn = await aiosqlite.connect(DB_PATH)
+        _aiosqlite_conn.row_factory = aiosqlite.Row
+        await _aiosqlite_conn.execute("PRAGMA journal_mode=WAL")
+        await _aiosqlite_conn.execute("PRAGMA foreign_keys=ON")
+        
+        logger.info("Connected to local SQLite")
+        
+    _db_adapter = DBAdapter(_db_instance)
+    return _db_adapter
+
+async def execute_query(db, query: str, params: tuple = None, fetch: str = "all"):
+    """
+    Unified query executor that translates SQLite `?` to Postgres `$1`, `$2` bindings.
+    db: The Databases instance returned by get_db()
+    fetch: "all" (Default), "one", "cursor", "execute"
+    """
+    if params is None:
+        params = ()
+        
+    bind_vals = {}
+    if CURRENT_DATABASE == "postgres" and _aiosqlite_conn is None:
+        # Translate ? to :p0, :p1, :p2 ...
+        parts = query.split('?')
+        new_query = parts[0]
+        for i in range(1, len(parts)):
+            new_query += f":p{i-1}" + parts[i]
+            
+        for i, val in enumerate(params):
+            # Postgres JSON fields require strings, dictionaries need dumps
+            if isinstance(val, (dict, list)):
+                bind_vals[f"p{i}"] = json.dumps(val)
+            else:
+                bind_vals[f"p{i}"] = val
+        query = new_query
+    else:
+        # SQLite with Databases: requires :p0, :p1 syntax too!
+        parts = query.split('?')
+        new_query = parts[0]
+        for i in range(1, len(parts)):
+            new_query += f":p{i-1}" + parts[i]
+        for i, val in enumerate(params):
+            if isinstance(val, (dict, list)):
+                bind_vals[f"p{i}"] = json.dumps(val)
+            else:
+                bind_vals[f"p{i}"] = val
+        query = new_query
+
+    if fetch == "all":
+        # Return a list of dicts to perfectly emulate aiosqlite.Row fetchall()
+        rows = await db.fetch_all(query=query, values=bind_vals)
+        return [dict(r) for r in rows]
+    elif fetch == "one":
+        row = await db.fetch_one(query=query, values=bind_vals)
+        if row is None:
+            return None
+        return dict(row)
+    else:
+        # Just Execute completely (inserts, deletes, updates)
+        return await db.execute(query=query, values=bind_vals)
 
 async def init_db():
     db = await get_db()
     try:
-        await db.executescript("""
+        schema = """
             CREATE TABLE IF NOT EXISTS organizations (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -272,18 +397,61 @@ async def init_db():
                 created_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS skills (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_bases (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_documents (
+                id TEXT PRIMARY KEY,
+                kb_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                embedding vector(1536),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (kb_id) REFERENCES knowledge_bases(id) ON DELETE CASCADE
+            );
+            
             CREATE INDEX IF NOT EXISTS idx_workflow_executions_workflow ON workflow_executions(workflow_id);
-        """)
-        await db.commit()
+        """
+        
+        if CURRENT_DATABASE == "postgres" and _aiosqlite_conn is None:
+            # asyncpg doesn't support multiple commands in one execute with parameters easily
+            # But Table creation has no params, so we can split by semicolon.
+            await db.db.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            statements = [s.strip() for s in schema.split(";") if s.strip()]
+            for stmt in statements:
+                await db.db.execute(stmt)
+        else:
+            await _aiosqlite_conn.executescript(schema)
+            await _aiosqlite_conn.commit()
 
         # Migration: add columns, seed defaults, create indexes
-        await _run_migrations(db)
+        await _run_migrations(db.db)
 
         # Seed demo agents & workflow (re-opens db internally)
         await _seed_demo_agents_workflow()
-    finally:
-        await db.close()
-
+    except Exception as e:
+        logger.error(f"Error initializing DB: {e}")
+        pass
+        
 
 async def _run_migrations(db):
     migrations = [
@@ -305,15 +473,16 @@ async def _run_migrations(db):
         ("secrets", "scope_id", "TEXT"),
         # Provider api_version column
         ("providers", "api_version", "TEXT"),
+        # Agent skills and knowledge extensions
+        ("agents", "skills", "TEXT"),
+        ("agents", "knowledge_bases", "TEXT"),
     ]
 
     for table, column, col_type in migrations:
         try:
-            await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            await execute_query(db, f"ALTER TABLE {table} ADD COLUMN {column} {col_type}", fetch="execute")
         except Exception:
             pass  # Column already exists
-
-    await db.commit()
 
     # Seed default org + environment + workspace and backfill existing rows
     now = datetime.utcnow().isoformat()
@@ -321,83 +490,99 @@ async def _run_migrations(db):
     DEFAULT_ENV_ID = "default-env"
     DEFAULT_WS_ID = "default-workspace"
 
-    cursor = await db.execute("SELECT id FROM organizations WHERE id = ?", (DEFAULT_ORG_ID,))
-    if not await cursor.fetchone():
-        await db.execute(
+    existing_org = await execute_query(db, "SELECT id FROM organizations WHERE id = ?", (DEFAULT_ORG_ID,), fetch="one")
+    if not existing_org:
+        await execute_query(
+            db,
             "INSERT INTO organizations (id, name, description, owner_email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (DEFAULT_ORG_ID, "Default Organization", "Auto-created default organization", "balasriharsha.ch@gmail.com", now, now)
+            (DEFAULT_ORG_ID, "Default Organization", "Auto-created default organization", "balasriharsha.ch@gmail.com", now, now),
+            fetch="execute"
         )
     
     # Backfill ANY existing organizations that are missing an owner_email
-    await db.execute(
+    await execute_query(
+        db,
         "UPDATE organizations SET owner_email = ? WHERE owner_email IS NULL",
-        ("balasriharsha.ch@gmail.com",)
+        ("balasriharsha.ch@gmail.com",),
+        fetch="execute"
     )
     
     # RBAC Backfill: Ensure all org owners exist as active owners in organization_members
-    cursor = await db.execute("SELECT id, owner_email FROM organizations WHERE owner_email IS NOT NULL")
-    orgs = await cursor.fetchall()
+    orgs = await execute_query(db, "SELECT id, owner_email FROM organizations WHERE owner_email IS NOT NULL")
     for org in orgs:
         org_id = org['id']
         owner_email = org['owner_email']
         
         # Check if owner is already mapped
-        member_cursor = await db.execute("SELECT id FROM organization_members WHERE org_id = ? AND user_email = ?", (org_id, owner_email))
-        if not await member_cursor.fetchone():
+        existing_member = await execute_query(db, "SELECT id FROM organization_members WHERE org_id = ? AND user_email = ?", (org_id, owner_email), fetch="one")
+        if not existing_member:
             import uuid
             member_id = str(uuid.uuid4())
-            await db.execute(
+            await execute_query(
+                db,
                 "INSERT INTO organization_members (id, org_id, user_email, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (member_id, org_id, owner_email, 'owner', 'active', now, now)
+                (member_id, org_id, owner_email, 'owner', 'active', now, now),
+                fetch="execute"
             )
 
     # Ensure default environment exists
-    cursor = await db.execute("SELECT id FROM environments WHERE id = ?", (DEFAULT_ENV_ID,))
-    if not await cursor.fetchone():
-        await db.execute(
+    existing_env = await execute_query(db, "SELECT id FROM environments WHERE id = ?", (DEFAULT_ENV_ID,), fetch="one")
+    if not existing_env:
+        await execute_query(
+            db,
             "INSERT INTO environments (id, org_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (DEFAULT_ENV_ID, DEFAULT_ORG_ID, "Default Environment", "Auto-created default environment", now, now)
+            (DEFAULT_ENV_ID, DEFAULT_ORG_ID, "Default Environment", "Auto-created default environment", now, now),
+            fetch="execute"
         )
 
     # Ensure default workspace exists
-    cursor = await db.execute("SELECT id FROM workspaces WHERE id = ?", (DEFAULT_WS_ID,))
-    if not await cursor.fetchone():
-        await db.execute(
+    existing_ws = await execute_query(db, "SELECT id FROM workspaces WHERE id = ?", (DEFAULT_WS_ID,), fetch="one")
+    if not existing_ws:
+        await execute_query(
+            db,
             "INSERT INTO workspaces (id, org_id, env_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (DEFAULT_WS_ID, DEFAULT_ORG_ID, DEFAULT_ENV_ID, "Default Workspace", "Auto-created default workspace", now, now)
+            (DEFAULT_WS_ID, DEFAULT_ORG_ID, DEFAULT_ENV_ID, "Default Workspace", "Auto-created default workspace", now, now),
+            fetch="execute"
         )
 
     # Backfill env_id on workspaces that don't have one
-    await db.execute("UPDATE workspaces SET env_id = ? WHERE env_id IS NULL", (DEFAULT_ENV_ID,))
+    await execute_query(db, "UPDATE workspaces SET env_id = ? WHERE env_id IS NULL", (DEFAULT_ENV_ID,), fetch="execute")
 
     # Backfill any rows missing workspace_id
     for table in ["tools", "mcp_servers", "runbooks", "workflows", "agents", "conversations"]:
-        await db.execute(f"UPDATE {table} SET workspace_id = ? WHERE workspace_id IS NULL", (DEFAULT_WS_ID,))
+        await execute_query(db, f"UPDATE {table} SET workspace_id = ? WHERE workspace_id IS NULL", (DEFAULT_WS_ID,), fetch="execute")
 
     # For providers, set org_id based on workspace's org_id, or default org
-    # First, update providers that have a workspace_id to use that workspace's org_id
-    await db.execute("""
-        UPDATE providers SET org_id = (
-            SELECT org_id FROM workspaces WHERE workspaces.id = providers.workspace_id
-        ) WHERE org_id IS NULL AND workspace_id IS NOT NULL
-    """)
-    # Then set default org for any remaining providers without org_id
-    await db.execute(f"UPDATE providers SET org_id = ? WHERE org_id IS NULL", (DEFAULT_ORG_ID,))
+    # Postgres doesn't easily support SQLite's correlated subqueries exactly the same way without a FROM clause sometimes,
+    # But it works generally. Wait, update query might be slightly different.
+    try:
+        await execute_query(db, """
+            UPDATE providers SET org_id = (
+                SELECT org_id FROM workspaces WHERE workspaces.id = providers.workspace_id
+            ) WHERE org_id IS NULL AND workspace_id IS NOT NULL
+        """, fetch="execute")
+    except Exception as e:
+        logger.error(f"Provider inner update failed: {e}")
+        pass
+        
+    await execute_query(db, f"UPDATE providers SET org_id = ? WHERE org_id IS NULL", (DEFAULT_ORG_ID,), fetch="execute")
 
-    await db.execute(
+    await execute_query(
+        db,
         "UPDATE observability_logs SET workspace_id = ?, org_id = ? WHERE workspace_id IS NULL",
-        (DEFAULT_WS_ID, DEFAULT_ORG_ID)
+        (DEFAULT_WS_ID, DEFAULT_ORG_ID),
+        fetch="execute"
     )
 
     # Migrate old secrets: workspace_id -> scope_type/scope_id (only for DBs that had the old schema)
     try:
-        await db.execute(
-            "UPDATE secrets SET scope_type = 'workspace', scope_id = workspace_id WHERE scope_type IS NULL AND workspace_id IS NOT NULL"
+        await execute_query(
+            db,
+            "UPDATE secrets SET scope_type = 'workspace', scope_id = workspace_id WHERE scope_type IS NULL AND workspace_id IS NOT NULL",
+            fetch="execute"
         )
     except Exception:
         pass  # Fresh DB doesn't have workspace_id column on secrets
-
-    await db.commit()
 
     # Create indexes on migration-added columns (safe now that columns exist)
     migration_indexes = [
@@ -422,11 +607,9 @@ async def _run_migrations(db):
     ]
     for idx_sql in migration_indexes:
         try:
-            await db.execute(idx_sql)
+            await execute_query(db, idx_sql, fetch="execute")
         except Exception:
             pass
-
-    await db.commit()
 
 
 async def _seed_demo_agents_workflow():

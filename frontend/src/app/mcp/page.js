@@ -201,15 +201,20 @@ export default function MCPPage() {
 
     return (
         <div className="animate-fade">
-            <div className="page-header flex items-center justify-between">
+            <header className="page-header">
                 <div>
-                    <h1>MCP Servers</h1>
-                    <p>Built-in and custom Model Context Protocol servers</p>
+                    <h1 className="page-title">
+                        <Server className="page-title-icon" />
+                        MCP Servers
+                    </h1>
+                    <p className="page-subtitle">Built-in and custom Model Context Protocol servers</p>
                 </div>
-                <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-                    <Plus size={16} /> Add Server
-                </button>
-            </div>
+                <div className="header-actions">
+                    <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+                        <Plus size={16} /> Add Server
+                    </button>
+                </div>
+            </header>
 
             {loading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><div className="loading-spinner" /></div>
@@ -228,28 +233,24 @@ export default function MCPPage() {
                         const isBuiltIn = server.server_type === 'builtin';
                         return (
                             <div key={server.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                <div style={{
-                                    padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14,
-                                    cursor: 'pointer'
-                                }} onClick={() => toggleExpand(server.id)}>
-                                    <div style={{
-                                        width: 40, height: 40, borderRadius: 'var(--radius-md)',
-                                        background: isBuiltIn ? 'rgba(249, 115, 22, 0.12)' : 'rgba(6, 182, 212, 0.12)',
-                                        color: isBuiltIn ? 'var(--orange)' : 'var(--cyan)',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                    }}>
-                                        <Icon size={20} />
-                                    </div>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ fontWeight: 600, fontSize: 15 }}>{server.name}</div>
-                                        <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                                            {server.type || 'Custom'} • {server.available_tools?.length || 0} tools
+                                <div className="card-header" onClick={() => toggleExpand(server.id)} style={{ cursor: 'pointer' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1 }}>
+                                        <div style={{
+                                            width: 40, height: 40, borderRadius: 'var(--radius-md)',
+                                            background: isBuiltIn ? 'rgba(249, 115, 22, 0.12)' : 'rgba(6, 182, 212, 0.12)',
+                                            color: isBuiltIn ? 'var(--orange)' : 'var(--cyan)',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                        }}>
+                                            <Icon size={20} />
+                                        </div>
+                                        <div>
+                                            <div className="card-title">{server.name}</div>
+                                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                                                {server.type || 'Custom'} • {server.available_tools?.length || 0} tools
+                                            </div>
                                         </div>
                                     </div>
-                                    <span className={`badge ${server.status === 'running' ? 'badge-success' : 'badge-neutral'}`}>
-                                        {server.status}
-                                    </span>
-                                    <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                                    <div className="header-actions" onClick={e => e.stopPropagation()}>
                                         {server.status !== 'running' && (
                                             <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleAction(server.id, 'start')} title="Start">
                                                 <Play size={14} />
@@ -279,8 +280,11 @@ export default function MCPPage() {
                                                 <Trash2 size={14} />
                                             </button>
                                         )}
+                                        <span className={`badge ${server.status === 'running' ? 'badge-success' : 'badge-neutral'}`}>
+                                            {server.status}
+                                        </span>
+                                        {expanded === server.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                                     </div>
-                                    {expanded === server.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                                 </div>
                                 {expanded === server.id && (
                                     <div style={{ padding: '0 20px 20px', borderTop: '1px solid var(--border-color)' }}>

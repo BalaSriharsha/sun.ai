@@ -28,56 +28,56 @@ import 'reactflow/dist/style.css';
 const NODE_CATEGORIES = [
     {
         name: 'Triggers',
-        color: '#10b981',
+        color: '#000000',
         items: [
-            { type: 'trigger', label: 'Manual Trigger', icon: Zap, desc: 'Start manually', color: '#10b981' },
-            { type: 'schedule', label: 'Schedule', icon: Clock, desc: 'Cron / interval', color: '#10b981' },
-            { type: 'webhook', label: 'Webhook', icon: Globe, desc: 'HTTP webhook', color: '#10b981' },
+            { type: 'trigger', label: 'Manual Trigger', icon: Zap, desc: 'Start manually', color: '#000000' },
+            { type: 'schedule', label: 'Schedule', icon: Clock, desc: 'Cron / interval', color: '#000000' },
+            { type: 'webhook', label: 'Webhook', icon: Globe, desc: 'HTTP webhook', color: '#000000' },
         ]
     },
     {
         name: 'AI',
-        color: '#8b5cf6',
+        color: '#000000',
         items: [
-            { type: 'ai_completion', label: 'AI Model', icon: Cpu, desc: 'LLM completion', color: '#8b5cf6' },
-            { type: 'ai_agent', label: 'AI Agent', icon: MessageSquare, desc: 'Agent with tools', color: '#a855f7' },
+            { type: 'ai_completion', label: 'AI Model', icon: Cpu, desc: 'LLM completion', color: '#000000' },
+            { type: 'ai_agent', label: 'AI Agent', icon: MessageSquare, desc: 'Agent with tools', color: '#000000' },
         ]
     },
     {
         name: 'Logic',
-        color: '#f59e0b',
+        color: '#000000',
         items: [
-            { type: 'conditional', label: 'IF', icon: GitBranch, desc: 'Branch logic', color: '#f59e0b' },
-            { type: 'loop', label: 'Loop', icon: Repeat, desc: 'Iterate items', color: '#06b6d4' },
-            { type: 'filter', label: 'Filter', icon: Filter, desc: 'Filter items', color: '#ec4899' },
-            { type: 'switch', label: 'Switch', icon: Layers, desc: 'Multi-branch', color: '#f97316' },
+            { type: 'conditional', label: 'IF', icon: GitBranch, desc: 'Branch logic', color: '#000000' },
+            { type: 'loop', label: 'Loop', icon: Repeat, desc: 'Iterate items', color: '#000000' },
+            { type: 'filter', label: 'Filter', icon: Filter, desc: 'Filter items', color: '#000000' },
+            { type: 'switch', label: 'Switch', icon: Layers, desc: 'Multi-branch', color: '#000000' },
         ]
     },
     {
         name: 'Actions',
-        color: '#3b82f6',
+        color: '#000000',
         items: [
-            { type: 'http_request', label: 'HTTP Request', icon: Globe, desc: 'Call any API', color: '#3b82f6' },
-            { type: 'tool_exec', label: 'Tool', icon: Wrench, desc: 'Run a tool', color: '#06b6d4' },
-            { type: 'mcp_call', label: 'MCP Server', icon: Server, desc: 'MCP tool', color: '#f97316' },
-            { type: 'code_node', label: 'Code', icon: Variable, desc: 'Run code', color: '#6366f1' },
+            { type: 'http_request', label: 'HTTP Request', icon: Globe, desc: 'Call any API', color: '#000000' },
+            { type: 'tool_exec', label: 'Tool', icon: Wrench, desc: 'Run a tool', color: '#000000' },
+            { type: 'mcp_call', label: 'MCP Server', icon: Server, desc: 'MCP tool', color: '#000000' },
+            { type: 'code_node', label: 'Code', icon: Variable, desc: 'Run code', color: '#000000' },
         ]
     },
     {
         name: 'Data',
-        color: '#14b8a6',
+        color: '#000000',
         items: [
-            { type: 'transform', label: 'Transform', icon: ArrowRightLeft, desc: 'Map data', color: '#14b8a6' },
-            { type: 'set_variable', label: 'Set Variable', icon: Variable, desc: 'Set values', color: '#64748b' },
-            { type: 'database_node', label: 'Database', icon: Database, desc: 'Query DB', color: '#f43f5e' },
+            { type: 'transform', label: 'Transform', icon: ArrowRightLeft, desc: 'Map data', color: '#000000' },
+            { type: 'set_variable', label: 'Set Variable', icon: Variable, desc: 'Set values', color: '#000000' },
+            { type: 'database_node', label: 'Database', icon: Database, desc: 'Query DB', color: '#000000' },
         ]
     },
     {
         name: 'Output',
-        color: '#84cc16',
+        color: '#000000',
         items: [
-            { type: 'output', label: 'Output', icon: FileOutput, desc: 'Final result', color: '#84cc16' },
-            { type: 'email_send', label: 'Send Email', icon: Mail, desc: 'Email output', color: '#ef4444' },
+            { type: 'output', label: 'Output', icon: FileOutput, desc: 'Final result', color: '#000000' },
+            { type: 'email_send', label: 'Send Email', icon: Mail, desc: 'Email output', color: '#000000' },
         ]
     }
 ];
@@ -114,7 +114,7 @@ function N8nNode({ data, selected, id }) {
 
             {/* Icon circle */}
             <div className="n8n-node-icon" style={{ background: nodeColor }}>
-                <Icon size={20} color="#fff" strokeWidth={2} />
+                <Icon size={20} color="var(--bg-primary)" strokeWidth={2} />
             </div>
 
             {/* Label */}
@@ -146,8 +146,8 @@ const nodeTypes = { n8n: N8nNode };
 const defaultEdgeOptions = {
     type: 'smoothstep',
     animated: true,
-    style: { stroke: '#6366f1', strokeWidth: 2.5 },
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#6366f1', width: 16, height: 16 },
+    style: { stroke: '#000000', strokeWidth: 2.5 },
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#000000', width: 16, height: 16 },
 };
 
 // ─────── NODE CONFIG PANEL ───────
@@ -165,7 +165,7 @@ function NodeConfigPanel({ node, onUpdate, onClose, onDelete, providers, allMode
             <div className="n8n-config-header">
                 <div className="n8n-config-title-row">
                     <div className="n8n-config-icon" style={{ background: config.color }}>
-                        <Icon size={16} color="#fff" />
+                        <Icon size={16} color="var(--bg-primary)" />
                     </div>
                     <div>
                         <input
@@ -244,15 +244,15 @@ function NodeConfigPanel({ node, onUpdate, onClose, onDelete, providers, allMode
                                         <label key={t.id} style={{
                                             display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px',
                                             borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                                            background: sel ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                            background: sel ? 'var(--bg-card-hover)' : 'transparent',
                                         }}>
                                             <input type="checkbox" checked={sel}
                                                 onChange={() => {
                                                     const cur = node.data?.tools || [];
                                                     updateField('tools', sel ? cur.filter(x => x !== t.id) : [...cur, t.id]);
                                                 }} />
-                                            <Wrench size={12} style={{ color: '#06b6d4' }} />
-                                            <span style={{ color: '#e0e0f0' }}>{t.name}</span>
+                                            <Wrench size={12} style={{ color: 'var(--text-primary)' }} />
+                                            <span style={{ color: 'var(--text-primary)' }}>{t.name}</span>
                                         </label>
                                     );
                                 })}
@@ -270,15 +270,15 @@ function NodeConfigPanel({ node, onUpdate, onClose, onDelete, providers, allMode
                                         <label key={s.id} style={{
                                             display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px',
                                             borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                                            background: sel ? 'rgba(249,115,22,0.15)' : 'transparent',
+                                            background: sel ? 'var(--bg-card-hover)' : 'transparent',
                                         }}>
                                             <input type="checkbox" checked={sel}
                                                 onChange={() => {
                                                     const cur = node.data?.mcp_servers || [];
                                                     updateField('mcp_servers', sel ? cur.filter(x => x !== s.id) : [...cur, s.id]);
                                                 }} />
-                                            <Server size={12} style={{ color: '#f97316' }} />
-                                            <span style={{ color: '#e0e0f0' }}>{s.name}</span>
+                                            <Server size={12} style={{ color: 'var(--text-primary)' }} />
+                                            <span style={{ color: 'var(--text-primary)' }}>{s.name}</span>
                                         </label>
                                     );
                                 })}
@@ -573,15 +573,20 @@ function WorkflowCanvas() {
     if (!activeWorkflow) {
         return (
             <div className="animate-fade">
-                <div className="page-header flex items-center justify-between">
+                <header className="page-header">
                     <div>
-                        <h1>Workflows</h1>
-                        <p>Build AI automation pipelines with a visual node editor</p>
+                        <h1 className="page-title">
+                            <GitBranch className="page-title-icon" />
+                            Workflows
+                        </h1>
+                        <p className="page-subtitle">Build AI automation pipelines with a visual node editor</p>
                     </div>
-                    <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-                        <Plus size={16} /> New Workflow
-                    </button>
-                </div>
+                    <div className="header-actions">
+                        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+                            <Plus size={16} /> New Workflow
+                        </button>
+                    </div>
+                </header>
 
                 {loading ? (
                     <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><div className="loading-spinner" /></div>
@@ -716,7 +721,7 @@ function WorkflowCanvas() {
                                                     onClick={() => addNode(item.type)}
                                                 >
                                                     <div className="n8n-palette-item-icon" style={{ background: item.color }}>
-                                                        <ItemIcon size={14} color="#fff" />
+                                                        <ItemIcon size={14} color="var(--bg-primary)" />
                                                     </div>
                                                     <div className="n8n-palette-item-info">
                                                         <div className="n8n-palette-item-label">{item.label}</div>
@@ -747,20 +752,20 @@ function WorkflowCanvas() {
                         fitView
                         snapToGrid
                         snapGrid={[16, 16]}
-                        style={{ background: '#0f0f1a' }}
+                        style={{ background: 'var(--bg-primary)' }}
                     >
-                        <Background color="#1e1e3a" gap={20} variant="dots" size={1.5} />
+                        <Background color="var(--border-color)" gap={20} variant="dots" size={1.5} />
                         <Controls
-                            style={{ background: '#1a1a2e', borderColor: '#2a2a4a', borderRadius: 10 }}
+                            style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: 10 }}
                             showInteractive={false}
                         />
                         <MiniMap
-                            style={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: 8 }}
+                            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8 }}
                             nodeColor={node => {
                                 const cfg = ALL_NODE_TYPES.find(n => n.type === node.data?.nodeType);
-                                return cfg?.color || '#6366f1';
+                                return cfg?.color || 'var(--border-color)';
                             }}
-                            maskColor="rgba(0,0,0,0.6)"
+                            maskColor="var(--bg-overlay)"
                         />
                         {/* Empty canvas message */}
                         {nodes.length === 0 && (

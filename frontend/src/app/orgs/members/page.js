@@ -122,7 +122,7 @@ export default function MembersPage() {
             {myMemberRecord?.status === 'pending' && (
                 <div className="alert-banner" style={{ background: 'var(--bg-card-hover)', padding: '16px', borderRadius: '8px', marginBottom: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <Mail style={{ color: 'var(--accent)' }} />
+                        <Mail style={{ color: 'var(--text-primary)' }} />
                         <div>
                             <h4 style={{ margin: 0 }}>You have a pending invitation!</h4>
                             <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--text-secondary)' }}>You've been invited to join <strong>{currentOrg?.name}</strong> as a {myMemberRecord.role}.</p>
@@ -159,20 +159,21 @@ export default function MembersPage() {
                                         <div className="secret-name">
                                             {m.user_email === currentUserEmail ? <BadgeCheck size={14} color="var(--accent)" /> : <Users size={14} />}
                                             <span style={{ fontWeight: 500 }}>{m.user_email}</span>
-                                            {m.user_email === currentUserEmail && <span className="inherited-badge" style={{ background: 'var(--accent)', color: 'white' }}>You</span>}
+                                            {m.user_email === currentUserEmail && <span className="inherited-badge" style={{ background: 'var(--text-primary)', color: 'var(--bg-primary)' }}>You</span>}
                                         </div>
                                     </td>
                                     <td>
                                         <span className={`scope-badge`} style={{
-                                            background: m.role === 'owner' ? '#4f46e520' : m.role === 'admin' ? '#0ea5e920' : '#334155',
-                                            color: m.role === 'owner' ? '#818cf8' : m.role === 'admin' ? '#38bdf8' : '#94a3b8'
+                                            background: 'var(--bg-primary)',
+                                            color: 'var(--text-primary)',
+                                            border: '1px solid var(--border-color)'
                                         }}>
                                             {m.role === 'owner' && <ShieldAlert size={12} />}
                                             {m.role}
                                         </span>
                                     </td>
                                     <td>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: m.status === 'active' ? '#10b981' : '#f59e0b' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-primary)' }}>
                                             {m.status === 'active' ? <BadgeCheck size={14} /> : <Clock size={14} />}
                                             {m.status.charAt(0).toUpperCase() + m.status.slice(1)}
                                         </div>

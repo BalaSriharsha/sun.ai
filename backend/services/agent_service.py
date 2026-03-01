@@ -5,8 +5,10 @@ from datetime import datetime
 from database import get_db
 from services.chat_service import stream_chat_completion, non_stream_chat_completion
 from services.tool_service import execute_tool, get_tool_schema_for_llm
+from services.tool_service import execute_tool, get_tool_schema_for_llm
 from services.observability_service import log_llm_call
 from services.mcp_service import execute_mcp_tool
+from services.knowledge_service import search_knowledge
 
 
 def _clean_azure_base_url(provider_type: str, base_url: str) -> str:
@@ -34,6 +36,8 @@ async def get_agent_config(agent_id: str):
         agent = dict(row)
         agent["tools"] = json.loads(agent.get("tools", "[]"))
         agent["mcp_servers"] = json.loads(agent.get("mcp_servers", "[]"))
+        agent["skills"] = json.loads(agent.get("skills", "[]"))
+        agent["knowledge_bases"] = json.loads(agent.get("knowledge_bases", "[]"))
 
         # Resolve workspace scope context for secrets access
         workspace_id = agent.get("workspace_id") or "default-workspace"
@@ -58,6 +62,18 @@ async def get_agent_config(agent_id: str):
             prow = await cursor.fetchone()
             if prow:
                 agent["provider"] = dict(prow)
+
+        # Inject Skills into System Prompt
+        skills_content = ""
+        for skill_id in agent["skills"]:
+            sc = await db.execute("SELECT name, content FROM skills WHERE id = ?", (skill_id,))
+            srow = await sc.fetchone()
+            if srow:
+                skills_content += f"\n\n--- Skill: {srow['name']} ---\n{srow['content']}"
+        
+        if skills_content:
+            base_prompt = agent.get("system_prompt", "")
+            agent["system_prompt"] = f"{base_prompt}\n\n# Your Skills\nYou have been granted the following specific skills and instructions. Follow them strictly:{skills_content}".strip()
 
         # Resolve model UUID → actual model_id string (e.g. "llama-3.3-70b-versatile")
         if agent.get("model_id"):
@@ -117,6 +133,26 @@ async def get_agent_config(agent_id: str):
         agent["tool_map"] = tool_map
         agent["mcp_tool_ids"] = mcp_tool_ids
         agent["mcp_server_map"] = mcp_server_map
+
+        # Inject Native Knowledge Base Semantic Search Tool natively if KBs are attached
+        if agent["knowledge_bases"]:
+            agent["has_knowledge_tool"] = True
+            agent["tool_schemas"].append({
+                "type": "function",
+                "function": {
+                    "name": "search_knowledge_base",
+                    "description": "Semantic search across your connected Knowledge Bases to find relevant documents and information.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "The search query to match against the vector database."},
+                        },
+                        "required": ["query"],
+                    }
+                }
+            })
+        else:
+            agent["has_knowledge_tool"] = False
 
         return agent
     finally:
@@ -242,7 +278,9 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
                 # Execute the tool — route to MCP or builtin
                 scope_ctx = agent.get("scope_context", {})
                 try:
-                    if fn_name in agent.get("mcp_tool_ids", set()):
+                    if fn_name == "search_knowledge_base" and agent.get("has_knowledge_tool"):
+                        tool_result = await search_knowledge(agent["knowledge_bases"], fn_args.get("query", ""))
+                    elif fn_name in agent.get("mcp_tool_ids", set()):
                         mcp_info = agent["mcp_server_map"][fn_name]
                         tool_result = await execute_mcp_tool(
                             mcp_info["server_id"], mcp_info["tool_name"], fn_args,
@@ -400,7 +438,9 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
 
                 scope_ctx = agent.get("scope_context", {})
                 try:
-                    if fn_name in agent.get("mcp_tool_ids", set()):
+                    if fn_name == "search_knowledge_base" and agent.get("has_knowledge_tool"):
+                        tool_result = await search_knowledge(agent["knowledge_bases"], fn_args.get("query", ""))
+                    elif fn_name in agent.get("mcp_tool_ids", set()):
                         mcp_info = agent["mcp_server_map"][fn_name]
                         tool_result = await execute_mcp_tool(
                             mcp_info["server_id"], mcp_info["tool_name"], fn_args,

@@ -110,19 +110,24 @@ export default function ToolsPage() {
 
     return (
         <div className="animate-fade">
-            <div className="page-header flex items-center justify-between">
+            <header className="page-header">
                 <div>
-                    <h1>Tools</h1>
-                    <p>Built-in and custom tools for AI agents</p>
+                    <h1 className="page-title">
+                        <Wrench className="page-title-icon" />
+                        Tools
+                    </h1>
+                    <p className="page-subtitle">Built-in and custom tools for AI agents</p>
                 </div>
-                <button className="btn btn-primary" onClick={() => {
-                    setEditingTool(null);
-                    setForm({ name: '', description: '', tool_type: 'custom', parameters_schema: '{}', code: '' });
-                    setShowModal(true);
-                }}>
-                    <Plus size={16} /> Create Tool
-                </button>
-            </div>
+                <div className="header-actions">
+                    <button className="btn btn-primary" onClick={() => {
+                        setEditingTool(null);
+                        setForm({ name: '', description: '', tool_type: 'custom', parameters_schema: '{}', code: '' });
+                        setShowModal(true);
+                    }}>
+                        <Plus size={16} /> Create Tool
+                    </button>
+                </div>
+            </header>
 
             <div className="tabs" style={{ maxWidth: 360 }}>
                 {['all', 'builtin', 'custom'].map(f => (
@@ -144,10 +149,11 @@ export default function ToolsPage() {
                         const isBuiltIn = tool.tool_type === 'builtin';
                         return (
                             <div key={tool.id} className="tool-card">
-                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+                                <div className="card-header" style={{ marginBottom: 10 }}>
                                     <div className="tool-card-icon" style={{
                                         background: isBuiltIn ? 'rgba(124, 58, 237, 0.12)' : 'rgba(6, 182, 212, 0.12)',
-                                        color: isBuiltIn ? 'var(--accent)' : 'var(--cyan)'
+                                        color: isBuiltIn ? 'var(--accent)' : 'var(--cyan)',
+                                        marginBottom: 0
                                     }}>
                                         <Icon size={20} />
                                     </div>
