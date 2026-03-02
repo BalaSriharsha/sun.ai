@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -130,23 +130,38 @@ async def delete_workflow(workflow_id: str):
 
 
 @router.post("/{workflow_id}/execute")
-async def run_workflow(workflow_id: str, req: WorkflowExecuteRequest):
-    result = await execute_workflow(workflow_id, req.input_data)
+async def run_workflow(workflow_id: str, req: WorkflowExecuteRequest, x_user_email: str = Header(None)):
+    result = await execute_workflow(workflow_id, req.input_data, x_user_email)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
 
 
 @router.get("/{workflow_id}/executions")
-async def list_executions(workflow_id: str, limit: int = 20):
+async def list_executions(workflow_id: str, x_user_email: str = Header(None), limit: int = 20):
     db = await get_db()
     try:
-        cursor = await db.execute(
-            """SELECT id, workflow_id, status, started_at, completed_at, error
-               FROM workflow_executions WHERE workflow_id = ?
-               ORDER BY started_at DESC LIMIT ?""",
-            (workflow_id, limit)
-        )
+        # Verify access first by fetching the workflow
+        cursor = await db.execute("SELECT workspace_id FROM workflows WHERE id = ?", (workflow_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+            
+        from auth import verify_workspace_access
+        await verify_workspace_access(row["workspace_id"], x_user_email)
+
+        query = """SELECT id, workflow_id, status, started_at, completed_at, error
+                   FROM workflow_executions WHERE workflow_id = ?"""
+        params = [workflow_id]
+        
+        if x_user_email:
+            query += " AND user_email = ?"
+            params.append(x_user_email)
+            
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
+        
+        cursor = await db.execute(query, tuple(params))
         rows = await cursor.fetchall()
         return {"executions": [dict(r) for r in rows]}
     finally:
@@ -177,7 +192,7 @@ class WorkflowQueryRequest(BaseModel):
 
 
 @router.post("/{workflow_id}/query")
-async def query_workflow(workflow_id: str, req: WorkflowQueryRequest):
+async def query_workflow(workflow_id: str, req: WorkflowQueryRequest, x_user_email: str = Header(None)):
     """Query endpoint — send input data and get workflow execution results.
     Each workflow gets its own queryable API."""
     db = await get_db()
@@ -188,7 +203,7 @@ async def query_workflow(workflow_id: str, req: WorkflowQueryRequest):
     finally:
         await db.close()
 
-    result = await execute_workflow(workflow_id, req.input_data)
+    result = await execute_workflow(workflow_id, req.input_data, x_user_email)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

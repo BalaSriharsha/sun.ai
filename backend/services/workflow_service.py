@@ -22,7 +22,7 @@ def _clean_azure_base_url(provider_type: str, base_url: str) -> str:
     return url
 
 
-async def execute_workflow(workflow_id: str, initial_data: dict = None) -> dict:
+async def execute_workflow(workflow_id: str, initial_data: dict = None, user_email: str = None) -> dict:
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,))
@@ -38,9 +38,9 @@ async def execute_workflow(workflow_id: str, initial_data: dict = None) -> dict:
         exec_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
         await db.execute(
-            """INSERT INTO workflow_executions (id, workflow_id, status, started_at, node_results)
-               VALUES (?, ?, 'running', ?, '{}')""",
-            (exec_id, workflow_id, now)
+            """INSERT INTO workflow_executions (id, workflow_id, user_email, status, started_at, node_results)
+               VALUES (?, ?, ?, 'running', ?, '{}')""",
+            (exec_id, workflow_id, user_email, now)
         )
         await db.execute(
             "UPDATE workflows SET last_run_at=?, execution_count=execution_count+1, last_run_status='running', updated_at=? WHERE id=?",

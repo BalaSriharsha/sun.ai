@@ -38,6 +38,7 @@ const navItems = [
     {
         section: 'Configure', items: [
             { href: '/orgs/members', label: 'Members & Roles', icon: Users },
+            { href: '/secrets', label: 'Secrets and Variables', icon: Key },
         ]
     },
     {

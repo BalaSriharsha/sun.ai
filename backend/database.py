@@ -332,6 +332,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS workflow_executions (
                 id TEXT PRIMARY KEY,
                 workflow_id TEXT NOT NULL,
+                user_email TEXT,
                 status TEXT DEFAULT 'running',
                 started_at TEXT NOT NULL,
                 completed_at TEXT,
@@ -343,6 +344,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
                 workspace_id TEXT,
+                user_email TEXT,
                 title TEXT NOT NULL,
                 model_id TEXT,
                 provider_id TEXT,
@@ -464,6 +466,9 @@ async def _run_migrations(db):
         ("workflows", "workspace_id", "TEXT"),
         ("agents", "workspace_id", "TEXT"),
         ("conversations", "workspace_id", "TEXT"),
+        ("conversations", "user_email", "TEXT"),
+        ("conversations", "agent_id", "TEXT"),
+        ("workflow_executions", "user_email", "TEXT"),
         ("observability_logs", "workspace_id", "TEXT"),
         ("observability_logs", "org_id", "TEXT"),
         # Environment layer

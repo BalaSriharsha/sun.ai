@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 from database import get_db
 from services.agent_service import run_agent, stream_agent
@@ -41,7 +41,7 @@ class AgentUpdate(BaseModel):
 
 
 class AgentQueryRequest(BaseModel):
-    query: str
+    query: Any  # Supports string or list of dicts (for vision)
     conversation_id: Optional[str] = None
     stream: Optional[bool] = True
 
@@ -224,20 +224,28 @@ async def query_agent(agent_id: str, req: AgentQueryRequest, x_user_email: str =
         now = datetime.utcnow().isoformat()
         if not conv_id:
             conv_id = str(uuid.uuid4())
+            # For title, extract text if query is a list
+            title_text = "Agent Chat"
+            if isinstance(req.query, str):
+                title_text = req.query[:50] + "..." if req.query else "Agent Chat"
+            elif isinstance(req.query, list) and len(req.query) > 0 and req.query[0].get("type") == "text":
+                title_text = req.query[0].get("text", "Agent Chat")[:50] + "..."
+                
             await db.execute(
-                """INSERT INTO conversations (id, workspace_id, title, model_id, provider_id, system_prompt, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (conv_id, agent["workspace_id"], req.query[:50] + "..." if req.query else "Agent Chat",
+                """INSERT INTO conversations (id, workspace_id, user_email, agent_id, title, model_id, provider_id, system_prompt, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (conv_id, agent["workspace_id"], x_user_email, agent_id, title_text,
                  agent["model_id"], agent["provider_id"], agent.get("system_prompt", ""), now, now)
             )
             await db.commit()
             
         # Save user message
         msg_id = str(uuid.uuid4())
+        content_to_save = json.dumps(req.query) if isinstance(req.query, list) else str(req.query)
         await db.execute(
             """INSERT INTO messages (id, conversation_id, role, content, model_id, created_at)
                VALUES (?, ?, 'user', ?, ?, ?)""",
-            (msg_id, conv_id, req.query, agent["model_id"], now)
+            (msg_id, conv_id, content_to_save, agent["model_id"], now)
         )
         await db.commit()
     finally:
@@ -291,23 +299,29 @@ async def query_agent(agent_id: str, req: AgentQueryRequest, x_user_email: str =
 
 
 @router.get("/{agent_id}/conversations")
-async def list_agent_conversations(agent_id: str, limit: int = 20):
-    """List conversations associated with this agent (via observability logs)."""
+async def list_agent_conversations(agent_id: str, x_user_email: str = Header(None), limit: int = 20):
+    """List conversations associated with this agent."""
     db = await get_db()
     try:
-        # Find conversations that used this agent through observability logs, MUST actually exist in conversations table
-        cursor = await db.execute(
-            """SELECT c.*, o.last_used 
-               FROM conversations c
-               JOIN (
-                   SELECT conversation_id, MAX(created_at) as last_used
-                   FROM observability_logs 
-                   WHERE source = 'agent' AND conversation_id IS NOT NULL AND provider_name != 'system'
-                   GROUP BY conversation_id
-               ) o ON c.id = o.conversation_id
-               ORDER BY o.last_used DESC LIMIT ?""",
-            (limit,)
-        )
+        # Verify access first by fetching the agent
+        cursor = await db.execute("SELECT workspace_id FROM agents WHERE id = ?", (agent_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        await verify_workspace_access(row["workspace_id"], x_user_email)
+
+        query = "SELECT * FROM conversations WHERE agent_id = ?"
+        params = [agent_id]
+
+        if x_user_email:
+            query += " AND user_email = ?"
+            params.append(x_user_email)
+            
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+
+        cursor = await db.execute(query, tuple(params))
         rows = await cursor.fetchall()
         conversations = [dict(row) for row in rows]
         return {"conversations": conversations}

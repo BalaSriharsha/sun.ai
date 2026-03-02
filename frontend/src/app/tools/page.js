@@ -191,47 +191,60 @@ export default function ToolsPage() {
 
             {showModal && (
                 <div className="modal-overlay" onClick={() => setShowModal(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 700 }}>
+                    <div className="modal" onClick={e => e.stopPropagation()} style={{ width: '90vw', maxWidth: 1200, height: '85vh', maxHeight: 800, display: 'flex', flexDirection: 'column', padding: '24px 32px' }}>
                         <div className="modal-header">
                             <h2 className="modal-title">{editingTool ? 'Edit Tool' : 'Create Custom Tool'}</h2>
                             <button className="btn btn-ghost btn-icon" onClick={() => setShowModal(false)}><X size={18} /></button>
                         </div>
-                        <form onSubmit={handleSave}>
-                            <div className="grid-2">
-                                <div className="form-group">
-                                    <label className="form-label">Tool Name</label>
-                                    <input className="form-input" required value={form.name}
-                                        onChange={e => setForm({ ...form, name: e.target.value })} placeholder="my_custom_tool" />
+                        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(250px, 300px) 1fr minmax(250px, 300px)', gap: 32, flex: 1, overflowY: 'auto', paddingRight: 8 }}>
+                                
+                                {/* Left Column: Info */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Tool Name</label>
+                                        <input className="form-input" required value={form.name}
+                                            onChange={e => setForm({ ...form, name: e.target.value })} placeholder="my_custom_tool" />
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Type</label>
+                                        <select className="form-select" value={form.tool_type}
+                                            onChange={e => setForm({ ...form, tool_type: e.target.value })}>
+                                            <option value="custom">Custom</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                        <label className="form-label">Description</label>
+                                        <textarea className="form-textarea" value={form.description}
+                                            onChange={e => setForm({ ...form, description: e.target.value })}
+                                            placeholder="What this tool does..." rows={4} style={{ resize: 'vertical' }} />
+                                    </div>
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label">Type</label>
-                                    <select className="form-select" value={form.tool_type}
-                                        onChange={e => setForm({ ...form, tool_type: e.target.value })}>
-                                        <option value="custom">Custom</option>
-                                    </select>
+
+                                {/* Middle Column: Python Code */}
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', marginBottom: 0 }}>
+                                        <label className="form-label">Python Code</label>
+                                        <textarea className="form-textarea" value={form.code}
+                                            onChange={e => setForm({ ...form, code: e.target.value })}
+                                            style={{ flex: 1, resize: 'none', fontFamily: 'var(--font-mono)', fontSize: 13 }}
+                                            placeholder='def execute(params):\n    # Your tool logic here\n    return {"result": params.get("input")}' />
+                                    </div>
+                                </div>
+
+                                {/* Right Column: Parameters Schema */}
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', marginBottom: 0 }}>
+                                        <label className="form-label">Parameters Schema (JSON)</label>
+                                        <textarea className="form-textarea" value={form.parameters_schema}
+                                            onChange={e => setForm({ ...form, parameters_schema: e.target.value })}
+                                            style={{ flex: 1, resize: 'none', fontFamily: 'var(--font-mono)', fontSize: 13 }}
+                                            placeholder='{"query": {"type": "string", "description": "Search query"}}' />
+                                    </div>
                                 </div>
                             </div>
-                            <div className="form-group">
-                                <label className="form-label">Description</label>
-                                <textarea className="form-textarea" value={form.description}
-                                    onChange={e => setForm({ ...form, description: e.target.value })}
-                                    placeholder="What this tool does..." rows={2} />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Parameters Schema (JSON)</label>
-                                <textarea className="form-textarea" value={form.parameters_schema}
-                                    onChange={e => setForm({ ...form, parameters_schema: e.target.value })}
-                                    style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
-                                    placeholder='{"query": {"type": "string", "description": "Search query"}}' rows={4} />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Python Code</label>
-                                <textarea className="form-textarea" value={form.code}
-                                    onChange={e => setForm({ ...form, code: e.target.value })}
-                                    style={{ fontFamily: 'var(--font-mono)', fontSize: 13, minHeight: 200 }}
-                                    placeholder='def execute(params):\n    # Your tool logic here\n    return {"result": params.get("input")}' />
-                            </div>
-                            <div className="modal-actions">
+                            
+                            <div className="modal-actions" style={{ paddingTop: 20, marginTop: 20, borderTop: '1px solid var(--border-color)' }}>
                                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
                                 <button type="submit" className="btn btn-primary">{editingTool ? 'Update' : 'Create'} Tool</button>
                             </div>

@@ -1,14 +1,18 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 from database import get_db
 from services.chat_service import stream_chat_completion, non_stream_chat_completion
 from services.tool_service import execute_tool, get_tool_schema_for_llm
+from services.document_parser import parse_document
 import uuid
 import json
 import asyncio
+import os
+import tempfile
+
 
 router = APIRouter()
 
@@ -31,7 +35,7 @@ def _clean_azure_base_url(base_url: str) -> str:
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: Any  # Supports string or list of dicts (for vision)
     tool_call_id: Optional[str] = None
     tool_calls: Optional[list] = None
 
@@ -56,7 +60,7 @@ class ConversationCreate(BaseModel):
 
 
 @router.post("/completions")
-async def chat_completions(request: ChatRequest):
+async def chat_completions(request: ChatRequest, x_user_email: str = Header(None)):
     db = await get_db()
     try:
         # Get provider info
@@ -96,22 +100,25 @@ async def chat_completions(request: ChatRequest):
             conv_id = str(uuid.uuid4())
             now = datetime.utcnow().isoformat()
             await db.execute(
-                """INSERT INTO conversations (id, workspace_id, title, model_id, provider_id, system_prompt, tools, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (conv_id, request.workspace_id, request.messages[0].content[:50] + "..." if request.messages else "New Chat",
+                """INSERT INTO conversations (id, workspace_id, user_email, title, model_id, provider_id, system_prompt, tools, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (conv_id, request.workspace_id, x_user_email, request.messages[0].content[:50] + "..." if request.messages else "New Chat",
                  request.model_id, request.provider_id, request.system_prompt, json.dumps(request.tools or []), now, now)
             )
             await db.commit()
 
-        # Save user message
         user_msg = request.messages[-1] if request.messages else None
         if user_msg and user_msg.role == "user":
             msg_id = str(uuid.uuid4())
             now = datetime.utcnow().isoformat()
+            
+            # Serialize content to JSON string if it's a list (vision format)
+            content_to_save = json.dumps(user_msg.content) if isinstance(user_msg.content, list) else str(user_msg.content)
+            
             await db.execute(
                 """INSERT INTO messages (id, conversation_id, role, content, model_id, created_at)
                    VALUES (?, ?, 'user', ?, ?, ?)""",
-                (msg_id, conv_id, user_msg.content, request.model_id, now)
+                (msg_id, conv_id, content_to_save, request.model_id, now)
             )
             await db.commit()
 
@@ -194,7 +201,7 @@ async def chat_completions(request: ChatRequest):
 
 
 @router.get("/conversations")
-async def list_conversations(workspace_id: Optional[str] = None):
+async def list_conversations(workspace_id: Optional[str] = None, x_user_email: str = Header(None)):
     db = await get_db()
     try:
         query = """
@@ -205,11 +212,16 @@ async def list_conversations(workspace_id: Optional[str] = None):
                 FROM observability_logs 
                 WHERE source = 'agent' AND conversation_id IS NOT NULL
             )
+            AND c.agent_id IS NULL
         """
         params = []
         if workspace_id:
             query += " AND c.workspace_id = ?"
             params.append(workspace_id)
+            
+        if x_user_email:
+            query += " AND c.user_email = ?"
+            params.append(x_user_email)
             
         query += " ORDER BY c.updated_at DESC"
         
@@ -227,15 +239,15 @@ async def list_conversations(workspace_id: Optional[str] = None):
 
 
 @router.post("/conversations")
-async def create_conversation(conv: ConversationCreate):
+async def create_conversation(conv: ConversationCreate, x_user_email: str = Header(None)):
     conv_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO conversations (id, workspace_id, title, model_id, provider_id, system_prompt, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (conv_id, conv.workspace_id, conv.title, conv.model_id, conv.provider_id, conv.system_prompt, now, now)
+            """INSERT INTO conversations (id, workspace_id, user_email, title, model_id, provider_id, system_prompt, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (conv_id, conv.workspace_id, x_user_email, conv.title, conv.model_id, conv.provider_id, conv.system_prompt, now, now)
         )
         await db.commit()
         return {"id": conv_id, "title": conv.title, "created_at": now}
@@ -244,10 +256,16 @@ async def create_conversation(conv: ConversationCreate):
 
 
 @router.get("/conversations/{conv_id}")
-async def get_conversation(conv_id: str):
+async def get_conversation(conv_id: str, x_user_email: str = Header(None)):
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT * FROM conversations WHERE id = ?", (conv_id,))
+        query = "SELECT * FROM conversations WHERE id = ?"
+        params = [conv_id]
+        if x_user_email:
+            query += " AND user_email = ?"
+            params.append(x_user_email)
+            
+        cursor = await db.execute(query, tuple(params))
         row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -260,9 +278,19 @@ async def get_conversation(conv_id: str):
 
 
 @router.delete("/conversations/{conv_id}")
-async def delete_conversation(conv_id: str):
+async def delete_conversation(conv_id: str, x_user_email: str = Header(None)):
     db = await get_db()
     try:
+        query = "SELECT id FROM conversations WHERE id = ?"
+        params = [conv_id]
+        if x_user_email:
+            query += " AND user_email = ?"
+            params.append(x_user_email)
+            
+        cursor = await db.execute(query, tuple(params))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversation not found")
+            
         await db.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
         await db.commit()
         return {"deleted": True}
@@ -271,9 +299,20 @@ async def delete_conversation(conv_id: str):
 
 
 @router.get("/conversations/{conv_id}/messages")
-async def get_messages(conv_id: str):
+async def get_messages(conv_id: str, x_user_email: str = Header(None)):
     db = await get_db()
     try:
+        # Check access
+        query = "SELECT id FROM conversations WHERE id = ?"
+        params = [conv_id]
+        if x_user_email:
+            query += " AND user_email = ?"
+            params.append(x_user_email)
+            
+        cursor = await db.execute(query, tuple(params))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Conversation not found")
+            
         cursor = await db.execute(
             "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
             (conv_id,)
@@ -285,6 +324,14 @@ async def get_messages(conv_id: str):
             m["tokens_used"] = json.loads(m.get("tokens_used", "{}"))
             if m.get("tool_calls"):
                 m["tool_calls"] = json.loads(m["tool_calls"])
+            
+            # Parse list content (e.g. vision objects) back to Python lists
+            if m.get("content") and isinstance(m["content"], str) and m["content"].startswith("["):
+                try:
+                    m["content"] = json.loads(m["content"])
+                except:
+                    pass
+                    
             messages.append(m)
         return {"messages": messages}
     finally:
@@ -306,3 +353,23 @@ async def execute_tool_in_chat(tool_name: str, parameters: dict):
 
     result = await execute_tool(tool_name, parameters, code)
     return {"result": result}
+
+
+@router.post("/parse_file")
+async def parse_chat_file(file: UploadFile = File(...), x_user_email: str = Header(None)):
+    """Parse documents uploaded to chat for text extraction."""
+    if not file:
+        raise HTTPException(status_code=400, detail="No file provided")
+        
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+        
+    try:
+        extracted_text = parse_document(tmp_path, file.filename)
+        return {"text": extracted_text, "filename": file.filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)

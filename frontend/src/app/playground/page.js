@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api, apiStream } from '@/lib/api';
 import { useWorkspace } from '@/lib/WorkspaceContext';
-import { Send, Plus, Trash2, Settings, Bot, User, Loader, MessageSquare, GitBranch, Wrench, Zap, Copy, Edit2, RotateCcw, Check, X } from 'lucide-react';
+import { Send, Plus, Trash2, Settings, Bot, User, Loader, MessageSquare, GitBranch, Wrench, Zap, Copy, Edit2, RotateCcw, Check, X, BookOpen, Paperclip, FileText, Image as ImageIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -39,21 +39,80 @@ export default function PlaygroundPage() {
     const [workflowInput, setWorkflowInput] = useState('{}');
     const [workflowResult, setWorkflowResult] = useState(null);
 
+    // Knowledge mode state
+    const [knowledgeBases, setKnowledgeBases] = useState([]);
+    const [selectedKB, setSelectedKB] = useState('');
+    const [knowledgeResults, setKnowledgeResults] = useState(null);
+
+    // Attachments State
+    const [attachments, setAttachments] = useState([]);
+    const [isUploading, setIsUploading] = useState(false);
+    const maxUploads = parseInt(process.env.NEXT_PUBLIC_MAX_CHAT_UPLOADS || '5', 10);
+
+    const fileToBase64 = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
+
+    const handleFileUpload = async (e) => {
+        const files = Array.from(e.target.files);
+        if (!files.length) return;
+
+        if (attachments.length + files.length > maxUploads) {
+            alert(`You can only upload up to ${maxUploads} files per message.`);
+            return;
+        }
+
+        setIsUploading(true);
+        const newAttachments = [...attachments];
+
+        for (const file of files) {
+            if (file.type.startsWith('image/')) {
+                try {
+                    const base64 = await fileToBase64(file);
+                    newAttachments.push({ type: 'image', name: file.name, content: base64 });
+                } catch (err) {
+                    console.error('Error reading image:', err);
+                }
+            } else {
+                try {
+                    const res = await api.uploadChatFile(file);
+                    newAttachments.push({ type: 'document', name: file.name, content: res.text });
+                } catch (err) {
+                    alert(`Failed to parse ${file.name}: ${err.message}`);
+                }
+            }
+        }
+
+        setAttachments(newAttachments);
+        setIsUploading(false);
+        e.target.value = null; // reset input
+    };
+
+    const removeAttachment = (index) => {
+        setAttachments(prev => prev.filter((_, i) => i !== index));
+    };
+
     useEffect(() => {
         if (currentOrgId) loadProviders();
         if (currentWorkspaceId) {
             loadAgents();
             loadWorkflows();
+            loadKBs();
         }
     }, [currentOrgId, currentWorkspaceId]);
 
     useEffect(() => {
-        loadConversations();
-    }, [mode, selectedAgent, selectedWorkflow]);
+        if (currentWorkspaceId) {
+            loadConversations();
+        }
+    }, [mode, selectedAgent, selectedWorkflow, selectedKB, currentWorkspaceId]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, agentSteps]);
+    }, [messages, agentSteps, knowledgeResults]);
 
     async function loadProviders() {
         if (!currentOrgId) return;
@@ -113,6 +172,11 @@ export default function PlaygroundPage() {
         try { setWorkflows((await api.getWorkflows(currentWorkspaceId)).workflows || []); } catch (e) { console.error(e); }
     }
 
+    async function loadKBs() {
+        if (!currentWorkspaceId) return;
+        try { setKnowledgeBases((await api.getKnowledgeBases(currentWorkspaceId)).knowledge_bases || []); } catch (e) { console.error(e); }
+    }
+
     async function loadMessages(convId) {
         try { setMessages((await api.getMessages(convId)).messages || []); } catch (e) { console.error(e); }
     }
@@ -125,6 +189,8 @@ export default function PlaygroundPage() {
             }).catch(e => console.error(e));
         } else if (mode === 'agent') {
             loadMessages(conv.id);
+        } else if (mode === 'knowledge') {
+            // No history viewing for KB queries yet, we just start fresh or show nothing
         } else {
             if (conv.provider_id) setSelectedProvider(conv.provider_id);
             if (conv.model_id) setSelectedModel(conv.model_id);
@@ -132,7 +198,7 @@ export default function PlaygroundPage() {
         }
     }
 
-    function startNewChat() { setActiveConv(null); setMessages([]); setInput(''); setAgentSteps([]); setWorkflowResult(null); }
+    function startNewChat() { setActiveConv(null); setMessages([]); setInput(''); setAgentSteps([]); setWorkflowResult(null); setKnowledgeResults(null); setAttachments([]); }
 
     async function deleteConversation(id, e) {
         e.stopPropagation();
@@ -175,10 +241,9 @@ export default function PlaygroundPage() {
         // Wait for state to update then submit
         setTimeout(() => {
             if (mode === 'chat') {
-                // To avoid relying on synthetic event state, we duplicate a small portion of handleSend
                 handleChatSendWithInput(editContent, newHistory);
             } else if (mode === 'agent') {
-                handleAgentSendWithInput(editContent, newHistory);
+                handleAgentSendWithInput(editContent, newHistory, []); // pass empty attachments on edit for now
             }
             setInput(originalInput);
         }, 50);
@@ -192,24 +257,66 @@ export default function PlaygroundPage() {
         setMessages(newHistory);
 
         setTimeout(() => {
+            const prevRawText = msgToRerun._rawText || msgToRerun.content;
             if (mode === 'chat') {
-                handleChatSendWithInput(msgToRerun.content, newHistory);
+                handleChatSendWithInput(prevRawText, newHistory);
             } else if (mode === 'agent') {
-                handleAgentSendWithInput(msgToRerun.content, newHistory);
+                handleAgentSendWithInput(prevRawText, newHistory, msgToRerun._attachments || []);
             }
         }, 50);
     };
 
-    // ── Chat Mode Send ──
-    async function handleChatSend() {
-        if (!input.trim() || !selectedProvider || !selectedModel || sending) return;
-        const userMsg = { role: 'user', content: input.trim() };
-        const newMessages = [...messages, userMsg];
+    async function handleChatSendWithInput(textToSend, currentMessages) {
+        const isKnowledge = mode === 'knowledge';
+        const hasInput = textToSend.trim() !== '' || attachments.length > 0;
+        if (!hasInput || !selectedProvider || !selectedModel || sending || isUploading) return;
+        if (isKnowledge && !selectedKB) return;
+
+        let messageContent = textToSend.trim();
+        const docAttachments = attachments.filter(a => a.type === 'document');
+        if (docAttachments.length > 0) {
+            const contextText = docAttachments.map(a => `--- File: ${a.name} ---\n${a.content}`).join('\n\n');
+            messageContent = messageContent ? `${messageContent}\n\nAttached Files:\n${contextText}` : `Attached Files:\n${contextText}`;
+        }
+
+        const imageAttachments = attachments.filter(a => a.type === 'image');
+        let finalUserContent = messageContent;
+        if (imageAttachments.length > 0) {
+            finalUserContent = [];
+            if (messageContent) finalUserContent.push({ type: 'text', text: messageContent });
+            for (const img of imageAttachments) finalUserContent.push({ type: 'image_url', image_url: { url: img.content } });
+        }
+
+        const userMsg = { role: 'user', content: finalUserContent, _rawText: textToSend, _attachments: [...attachments] };
+        const newMessages = [...(currentMessages || messages), userMsg];
         setMessages(newMessages);
         setInput('');
+        setAttachments([]);
         setSending(true);
 
         try {
+            let finalSystemPrompt = systemPrompt;
+
+            // If in knowledge mode, fetch context first
+            if (isKnowledge && textToSend.trim()) {
+                try {
+                    const kbRes = await api.queryKnowledgeBase(selectedKB, textToSend.trim(), 5);
+                    const docs = kbRes.results || [];
+
+                    if (docs.length > 0) {
+                        const contextTexts = docs.map(d => `Document: ${d.title}\n${d.content}`).join('\n\n---\n\n');
+                        const kbPrompt = `You are a helpful assistant. Use the following retrieved knowledge base documents to answer the user's question. If the answer cannot be found in the documents, just say you don't know.\n\nRetrieved Documents:\n${contextTexts}`;
+                        finalSystemPrompt = finalSystemPrompt ? `${finalSystemPrompt}\n\n${kbPrompt}` : kbPrompt;
+                    } else {
+                        const kbPrompt = `You are a helpful assistant. The user searched the knowledge base but no relevant documents were found. Let the user know you couldn't find any specific information in their knowledge base regarding this query.`;
+                        finalSystemPrompt = finalSystemPrompt ? `${finalSystemPrompt}\n\n${kbPrompt}` : kbPrompt;
+                    }
+                } catch (e) {
+                    console.error("Failed to query KB:", e);
+                    // Continue anyway, but without context
+                }
+            }
+
             const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
             const response = await fetch(`${API_BASE}/chat/completions`, {
                 method: 'POST',
@@ -217,7 +324,7 @@ export default function PlaygroundPage() {
                 body: JSON.stringify({
                     provider_id: selectedProvider, model_id: selectedModel,
                     messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-                    system_prompt: systemPrompt || undefined, temperature,
+                    system_prompt: finalSystemPrompt || undefined, temperature,
                     conversation_id: activeConv?.id || undefined, stream: true,
                     workspace_id: currentWorkspaceId,
                 }),
@@ -266,15 +373,32 @@ export default function PlaygroundPage() {
 
     // ── Agent Mode Send ──
     async function handleAgentSend() {
-        if (!input.trim() || !selectedAgent || sending) return;
-        handleAgentSendWithInput(input, messages);
+        if ((!input.trim() && attachments.length === 0) || !selectedAgent || sending || isUploading) return;
+        handleAgentSendWithInput(input, messages, attachments);
     }
 
-    async function handleAgentSendWithInput(textToSend, currentMessages) {
+    async function handleAgentSendWithInput(textToSend, currentMessages, att = []) {
         setSending(true);
-        const userMsg = { role: 'user', content: textToSend };
+
+        let messageContent = textToSend.trim();
+        const docAttachments = att.filter(a => a.type === 'document');
+        if (docAttachments.length > 0) {
+            const contextText = docAttachments.map(a => `--- File: ${a.name} ---\n${a.content}`).join('\n\n');
+            messageContent = messageContent ? `${messageContent}\n\nAttached Files:\n${contextText}` : `Attached Files:\n${contextText}`;
+        }
+
+        const imageAttachments = att.filter(a => a.type === 'image');
+        let finalUserContent = messageContent;
+        if (imageAttachments.length > 0) {
+            finalUserContent = [];
+            if (messageContent) finalUserContent.push({ type: 'text', text: messageContent });
+            for (const img of imageAttachments) finalUserContent.push({ type: 'image_url', image_url: { url: img.content } });
+        }
+
+        const userMsg = { role: 'user', content: finalUserContent, _rawText: textToSend, _attachments: [...att] };
         setMessages(prev => [...(currentMessages || prev), userMsg]);
         setInput('');
+        setAttachments([]);
         setAgentSteps([]);
 
         try {
@@ -283,7 +407,7 @@ export default function PlaygroundPage() {
             const response = await fetch(`${API_BASE}/agents/${selectedAgent}/query`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: textToSend, stream: true, conversation_id: reqConvId, workspace_id: currentWorkspaceId }),
+                body: JSON.stringify({ query: finalUserContent, stream: true, conversation_id: reqConvId, workspace_id: currentWorkspaceId }),
             });
 
             const reader = response.body.getReader();
@@ -332,6 +456,13 @@ export default function PlaygroundPage() {
         try {
             let inputData = {};
             try { inputData = JSON.parse(workflowInput); } catch (e) { /* use empty */ }
+
+            // Inject attachments into inputData
+            if (attachments.length > 0) {
+                inputData._attachments = attachments;
+            }
+
+            setAttachments([]); // clear after sending
             const res = await api.queryWorkflow(selectedWorkflow, { input_data: inputData });
             setWorkflowResult(res);
         } catch (e) {
@@ -340,8 +471,12 @@ export default function PlaygroundPage() {
         setSending(false);
     }
 
+    function handleChatSend() {
+        handleChatSendWithInput(input, messages);
+    }
+
     function handleSend() {
-        if (mode === 'chat') handleChatSend();
+        if (mode === 'chat' || mode === 'knowledge') handleChatSend();
         else if (mode === 'agent') handleAgentSend();
     }
 
@@ -394,6 +529,7 @@ export default function PlaygroundPage() {
                             { id: 'chat', label: 'Chat', icon: MessageSquare },
                             { id: 'agent', label: 'Agent', icon: Bot },
                             { id: 'workflow', label: 'Workflow', icon: GitBranch },
+                            { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
                         ].map(tab => (
                             <button key={tab.id}
                                 onClick={() => { setMode(tab.id); startNewChat(); }}
@@ -413,7 +549,7 @@ export default function PlaygroundPage() {
 
                     {/* Config Bar */}
                     <div style={{ padding: '10px 20px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                        {mode === 'chat' && (
+                        {(mode === 'chat' || mode === 'knowledge') && (
                             <>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                     <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-tertiary)' }}>Provider</label>
@@ -435,7 +571,17 @@ export default function PlaygroundPage() {
                                         {currentModels.map(m => <option key={m.id} value={m.model_id}>{m.model_id}</option>)}
                                     </select>
                                 </div>
-                                {showSettings && (
+                                {mode === 'knowledge' && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-tertiary)' }}>Knowledge</label>
+                                        <select className="form-select" style={{ width: 220, padding: '6px 30px 6px 10px', fontSize: 13 }}
+                                            value={selectedKB} onChange={e => setSelectedKB(e.target.value)}>
+                                            <option value="">Select a KB...</option>
+                                            {knowledgeBases.map(kb => <option key={kb.id} value={kb.id}>{kb.name}</option>)}
+                                        </select>
+                                    </div>
+                                )}
+                                {showSettings && mode === 'chat' && (
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-tertiary)' }}>Temp</label>
@@ -501,8 +647,41 @@ export default function PlaygroundPage() {
                                         <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Input Data (JSON)</label>
                                         <textarea className="form-textarea"
                                             value={workflowInput} onChange={e => setWorkflowInput(e.target.value)}
-                                            style={{ fontFamily: 'var(--font-mono)', fontSize: 13, minHeight: 120 }}
+                                            style={{ fontFamily: 'var(--font-mono)', fontSize: 13, minHeight: 120, marginBottom: 12 }}
                                             placeholder='{"key": "value"}' />
+
+                                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                                            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', opacity: (isUploading || attachments.length >= maxUploads) ? 0.5 : 1 }}>
+                                                {isUploading ? <Loader size={14} className="animate-spin" /> : <Paperclip size={14} />}
+                                                {isUploading ? 'Uploading...' : 'Add File'}
+                                                <input type="file" multiple onChange={handleFileUpload}
+                                                    disabled={isUploading || attachments.length >= maxUploads}
+                                                    style={{ display: 'none' }} />
+                                            </label>
+                                            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Up to {maxUploads} files</span>
+                                        </div>
+
+                                        {attachments.length > 0 && (
+                                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                                                {attachments.map((att, i) => (
+                                                    <div key={i} style={{
+                                                        position: 'relative', background: 'var(--bg-tertiary)',
+                                                        padding: '6px 10px', borderRadius: 'var(--radius-sm)',
+                                                        fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
+                                                        border: '1px solid var(--border-color)', maxWidth: 200
+                                                    }}>
+                                                        {att.type === 'image' ? <ImageIcon size={14} className="text-info" /> : <FileText size={14} className="text-warning" />}
+                                                        <span className="truncate">{att.name}</span>
+                                                        <button onClick={() => removeAttachment(i)} style={{
+                                                            position: 'absolute', top: -6, right: -6, background: 'var(--bg-secondary)',
+                                                            border: '1px solid var(--border-color)', borderRadius: '50%', padding: 2, cursor: 'pointer'
+                                                        }}>
+                                                            <X size={10} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                     <button className="btn btn-primary" onClick={handleWorkflowExecute} disabled={sending} style={{ marginBottom: 20 }}>
                                         {sending ? <><Loader size={14} className="animate-spin" /> Executing...</> :
@@ -547,11 +726,13 @@ export default function PlaygroundPage() {
                         <>
                             {messages.length === 0 && (
                                 <div className="empty-state" style={{ height: '100%' }}>
-                                    {mode === 'chat' ? <Bot size={48} /> : <Bot size={48} />}
-                                    <h3>{mode === 'chat' ? 'Chat Playground' : 'Agent Playground'}</h3>
+                                    {mode === 'chat' ? <Bot size={48} /> : mode === 'knowledge' ? <BookOpen size={48} /> : <Bot size={48} />}
+                                    <h3>{mode === 'chat' ? 'Chat Playground' : mode === 'knowledge' ? 'Knowledge Chat' : 'Agent Playground'}</h3>
                                     <p>{mode === 'chat'
                                         ? 'Select a provider and model, then start chatting.'
-                                        : 'Select an agent and send a query. The agent will use tools autonomously.'
+                                        : mode === 'knowledge'
+                                            ? 'Select a knowledge base, provider, and model, then ask questions about your documents.'
+                                            : 'Select an agent and send a query. The agent will use tools autonomously.'
                                     }</p>
                                 </div>
                             )}
@@ -626,9 +807,23 @@ export default function PlaygroundPage() {
                                             </div>
                                         ) : (
                                             <div className="chat-message-text markdown-content" style={{ fontSize: 13, lineHeight: 1.6 }}>
-                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                                    {msg.content}
-                                                </ReactMarkdown>
+                                                {/* Render mixed content block if content is an array (e.g., vision payload) */}
+                                                {Array.isArray(msg.content) ? (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                                        {msg.content.map((block, idx) => {
+                                                            if (block.type === 'text') {
+                                                                return <ReactMarkdown key={idx} remarkPlugins={[remarkGfm]}>{block.text}</ReactMarkdown>;
+                                                            } else if (block.type === 'image_url') {
+                                                                return <img key={idx} src={block.image_url.url} alt="Attached image" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }} />;
+                                                            }
+                                                            return null;
+                                                        })}
+                                                    </div>
+                                                ) : (
+                                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                        {msg.content}
+                                                    </ReactMarkdown>
+                                                )}
                                             </div>
                                         )}
 
@@ -720,12 +915,47 @@ export default function PlaygroundPage() {
 
                 {/* Input (Chat/Agent modes) */}
                 {mode !== 'workflow' && (
-                    <div className="chat-input-area">
-                        <div className="chat-input-wrapper">
+                    <div className="chat-input-area" style={{ position: 'relative' }}>
+
+                        {/* Attachments Preview */}
+                        {attachments.length > 0 && (
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '0 20px 10px', marginTop: '-10px' }}>
+                                {attachments.map((att, i) => (
+                                    <div key={i} style={{
+                                        position: 'relative', background: 'var(--bg-tertiary)',
+                                        padding: '6px 10px', borderRadius: 'var(--radius-sm)',
+                                        fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
+                                        border: '1px solid var(--border-color)', maxWidth: 200
+                                    }}>
+                                        {att.type === 'image' ? <ImageIcon size={14} className="text-info" /> : <FileText size={14} className="text-warning" />}
+                                        <span className="truncate">{att.name}</span>
+                                        <button onClick={() => removeAttachment(i)} style={{
+                                            position: 'absolute', top: -6, right: -6, background: 'var(--bg-secondary)',
+                                            border: '1px solid var(--border-color)', borderRadius: '50%', padding: 2, cursor: 'pointer'
+                                        }}>
+                                            <X size={10} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="chat-input-wrapper" style={{ position: 'relative' }}>
+                            <label style={{
+                                position: 'absolute', left: 16, top: 16, cursor: (isUploading || attachments.length >= maxUploads) ? 'default' : 'pointer',
+                                color: (isUploading || attachments.length >= maxUploads) ? 'var(--text-tertiary)' : 'var(--text-secondary)',
+                                zIndex: 10
+                            }} title={attachments.length >= maxUploads ? `Max ${maxUploads} uploads` : 'Upload file'}>
+                                {isUploading ? <Loader size={20} className="animate-spin" /> : <Paperclip size={20} />}
+                                <input type="file" multiple onChange={handleFileUpload}
+                                    disabled={isUploading || attachments.length >= maxUploads}
+                                    style={{ display: 'none' }} />
+                            </label>
+
                             <textarea
                                 className="chat-input"
                                 placeholder={
-                                    mode === 'chat'
+                                    mode === 'chat' || mode === 'knowledge'
                                         ? (selectedModel ? `Message ${selectedModel}...` : 'Select a provider and model...')
                                         : (selectedAgent ? `Message ${selectedAgentObj?.name || 'agent'}...` : 'Select an agent...')
                                 }
@@ -733,11 +963,12 @@ export default function PlaygroundPage() {
                                 onChange={e => setInput(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                                 rows={1}
-                                disabled={mode === 'chat' ? (!selectedProvider || !selectedModel) : !selectedAgent}
+                                disabled={(mode === 'chat' || mode === 'knowledge') ? (!selectedProvider || !selectedModel || (mode === 'knowledge' && !selectedKB)) : !selectedAgent}
+                                style={{ paddingLeft: 46 }}
                             />
                             <button className="btn btn-primary" onClick={handleSend}
-                                disabled={!input.trim() || sending ||
-                                    (mode === 'chat' ? (!selectedProvider || !selectedModel) : !selectedAgent)}>
+                                disabled={(!input.trim() && attachments.length === 0) || sending || isUploading ||
+                                    ((mode === 'chat' || mode === 'knowledge') ? (!selectedProvider || !selectedModel || (mode === 'knowledge' && !selectedKB)) : !selectedAgent)}>
                                 <Send size={16} />
                             </button>
                         </div>

@@ -1,9 +1,24 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
-let currentUserEmail = null;
+let currentUserEmail = typeof window !== 'undefined' ? localStorage.getItem('agentic_user_email') : null;
+
+const getCurrentUserEmail = () => {
+    if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('agentic_user_email');
+        if (stored) return stored;
+    }
+    return currentUserEmail;
+};
 
 export const setApiUserEmail = (email) => {
     currentUserEmail = email;
+    if (typeof window !== 'undefined') {
+        if (email) {
+            localStorage.setItem('agentic_user_email', email);
+        } else {
+            localStorage.removeItem('agentic_user_email');
+        }
+    }
 };
 
 export async function apiFetch(path, options = {}) {
@@ -13,8 +28,9 @@ export async function apiFetch(path, options = {}) {
         ...options.headers,
     };
 
-    if (currentUserEmail) {
-        headers['x-user-email'] = currentUserEmail;
+    const email = getCurrentUserEmail();
+    if (email) {
+        headers['x-user-email'] = email;
     }
 
     const config = {
@@ -50,8 +66,9 @@ export function apiStream(path, options = {}) {
         ...options.headers,
     };
 
-    if (currentUserEmail) {
-        headers['x-user-email'] = currentUserEmail;
+    const email = getCurrentUserEmail();
+    if (email) {
+        headers['x-user-email'] = email;
     }
 
     return fetch(url, {
@@ -99,6 +116,30 @@ export const api = {
     getConversation: (id) => apiFetch(`/chat/conversations/${id}`),
     deleteConversation: (id) => apiFetch(`/chat/conversations/${id}`, { method: 'DELETE' }),
     getMessages: (id) => apiFetch(`/chat/conversations/${id}/messages`),
+    uploadChatFile: async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const url = `${API_BASE}/chat/parse_file`;
+        const headers = {};
+        const email = getCurrentUserEmail();
+        if (email) {
+            headers['x-user-email'] = email;
+        }
+
+        const res = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: formData
+        });
+
+        if (!res.ok) {
+            let error;
+            try { error = await res.json(); } catch { error = { detail: res.statusText }; }
+            throw new Error(error.detail || `API Error: ${res.status}`);
+        }
+        return res.json();
+    },
 
     // Workflows (workspace-scoped)
     getWorkflows: (workspaceId) => apiFetch(`/workflows?workspace_id=${workspaceId}`),
@@ -154,5 +195,30 @@ export const api = {
     // Knowledge Documents
     getDocuments: (kbId) => apiFetch(`/knowledge/${kbId}/documents`),
     createDocument: (kbId, data) => apiFetch(`/knowledge/${kbId}/documents`, { method: 'POST', body: JSON.stringify(data) }),
+    queryKnowledgeBase: (kbId, query, topK = 5) => apiFetch(`/knowledge/${kbId}/query`, { method: 'POST', body: JSON.stringify({ query, top_k: topK }) }),
+    uploadDocument: async (kbId, file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const url = `${API_BASE}/knowledge/${kbId}/documents/upload`;
+        const headers = {};
+        const email = getCurrentUserEmail();
+        if (email) {
+            headers['x-user-email'] = email;
+        }
+
+        const res = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: formData
+        });
+
+        if (!res.ok) {
+            let error;
+            try { error = await res.json(); } catch { error = { detail: res.statusText }; }
+            throw new Error(error.detail || `API Error: ${res.status}`);
+        }
+        return res.json();
+    },
     deleteDocument: (kbId, docId) => apiFetch(`/knowledge/${kbId}/documents/${docId}`, { method: 'DELETE' }),
 };

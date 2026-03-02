@@ -18,6 +18,8 @@ export default function KnowledgePage() {
     const [isDocModalOpen, setIsDocModalOpen] = useState(false);
     const [docFormData, setDocFormData] = useState({ title: '', content: '' });
     const [docSaving, setDocSaving] = useState(false);
+    const [docMode, setDocMode] = useState('text'); // 'text' or 'file'
+    const [selectedFile, setSelectedFile] = useState(null);
 
     useEffect(() => {
         if (currentWorkspace) fetchKBs();
@@ -79,7 +81,12 @@ export default function KnowledgePage() {
         e.preventDefault();
         setDocSaving(true);
         try {
-            await api.createDocument(activeKb.id, docFormData);
+            if (docMode === 'file') {
+                if (!selectedFile) throw new Error("Please select a file to upload");
+                await api.uploadDocument(activeKb.id, selectedFile);
+            } else {
+                await api.createDocument(activeKb.id, docFormData);
+            }
             setIsDocModalOpen(false);
             fetchDocuments(activeKb.id);
             fetchKBs();
@@ -163,34 +170,64 @@ export default function KnowledgePage() {
                     <div className="modal-overlay" onClick={() => setIsDocModalOpen(false)}>
                         <div className="modal" style={{ maxWidth: '600px' }} onClick={e => e.stopPropagation()}>
                             <div className="modal-header">
-                                <h2 className="modal-title">Embed Text Document</h2>
+                                <h2 className="modal-title">Embed Document</h2>
                                 <button className="btn btn-ghost btn-icon" onClick={() => setIsDocModalOpen(false)}>✕</button>
                             </div>
-                            <form onSubmit={handleDocSubmit}>
+                            
+                            <div className="tabs" style={{ padding: '0 24px', borderBottom: '1px solid var(--border-color)', marginBottom: 16 }}>
+                                <button className={`tab ${docMode === 'text' ? 'active' : ''}`} onClick={() => setDocMode('text')}>
+                                    Plain Text
+                                </button>
+                                <button className={`tab ${docMode === 'file' ? 'active' : ''}`} onClick={() => setDocMode('file')}>
+                                    File Upload
+                                </button>
+                            </div>
+                            
+                            <form onSubmit={handleDocSubmit} style={{ padding: '0 24px 24px' }}>
                                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-                                    Your text will be chunked and passed through the OpenAI `text-embedding-3-small` model and saved into the vector database.
+                                    Your document will be parsed, chunked, and passed through the OpenAI `text-embedding-3-small` model and saved into the vector database.
                                 </p>
-                                <div className="form-group">
-                                    <label className="form-label">Document Title</label>
-                                    <input
-                                        type="text"
-                                        className="form-input"
-                                        value={docFormData.title}
-                                        onChange={(e) => setDocFormData({ ...docFormData, title: e.target.value })}
-                                        required
-                                    />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Plain Text Content</label>
-                                    <textarea
-                                        className="form-textarea"
-                                        value={docFormData.content}
-                                        onChange={(e) => setDocFormData({ ...docFormData, content: e.target.value })}
-                                        rows={8}
-                                        required
-                                    />
-                                </div>
-                                <div className="modal-actions">
+                                
+                                {docMode === 'text' ? (
+                                    <>
+                                        <div className="form-group">
+                                            <label className="form-label">Document Title</label>
+                                            <input
+                                                type="text"
+                                                className="form-input"
+                                                value={docFormData.title}
+                                                onChange={(e) => setDocFormData({ ...docFormData, title: e.target.value })}
+                                                required
+                                            />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Plain Text Content</label>
+                                            <textarea
+                                                className="form-textarea"
+                                                value={docFormData.content}
+                                                onChange={(e) => setDocFormData({ ...docFormData, content: e.target.value })}
+                                                rows={8}
+                                                required
+                                            />
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="form-group">
+                                        <label className="form-label">Upload File (PDF, DOCX, XLSX, CSV, Images, Audio, Video)</label>
+                                        <input 
+                                            type="file" 
+                                            className="form-input" 
+                                            style={{ padding: '12px' }}
+                                            onChange={(e) => setSelectedFile(e.target.files[0])}
+                                            required 
+                                        />
+                                        <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8 }}>
+                                            Supported: .txt, .pdf, .docx, .xlsx, .csv, .jpg, .png, .mp3, .wav, .mp4, .mov
+                                        </p>
+                                    </div>
+                                )}
+                                
+                                <div className="modal-actions" style={{ marginTop: 24 }}>
                                     <button type="button" className="btn btn-secondary" disabled={docSaving} onClick={() => setIsDocModalOpen(false)}>Cancel</button>
                                     <button type="submit" className="btn btn-primary" disabled={docSaving}>
                                         {docSaving ? <><Loader2 size={14} className="spin" style={{ marginRight: '6px' }} /> Embedding...</> : 'Embed Knowledge'}

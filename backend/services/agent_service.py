@@ -34,10 +34,10 @@ async def get_agent_config(agent_id: str):
         if not row:
             return None
         agent = dict(row)
-        agent["tools"] = json.loads(agent.get("tools", "[]"))
-        agent["mcp_servers"] = json.loads(agent.get("mcp_servers", "[]"))
-        agent["skills"] = json.loads(agent.get("skills", "[]"))
-        agent["knowledge_bases"] = json.loads(agent.get("knowledge_bases", "[]"))
+        agent["tools"] = json.loads(agent.get("tools") or "[]")
+        agent["mcp_servers"] = json.loads(agent.get("mcp_servers") or "[]")
+        agent["skills"] = json.loads(agent.get("skills") or "[]")
+        agent["knowledge_bases"] = json.loads(agent.get("knowledge_bases") or "[]")
 
         # Resolve workspace scope context for secrets access
         workspace_id = agent.get("workspace_id") or "default-workspace"
