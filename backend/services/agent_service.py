@@ -159,8 +159,9 @@ async def get_agent_config(agent_id: str):
         await db.close()
 
 
+from typing import Any
 
-async def run_agent(agent_id: str, query: str, conversation_id: str = None):
+async def run_agent(agent_id: str, query: Any, conversation_id: str = None):
     """Run agent with agentic tool-calling loop (non-streaming)."""
     agent = await get_agent_config(agent_id)
     if not agent:
@@ -183,7 +184,14 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
             )
             rows = await cursor.fetchall()
             for r in rows:
-                msg = {"role": r["role"], "content": r["content"] if r["content"] is not None else ""}
+                content = r["content"] if r["content"] is not None else ""
+                if content and isinstance(content, str) and content.startswith("["):
+                    try:
+                        content = json.loads(content)
+                    except:
+                        pass
+                
+                msg = {"role": r["role"], "content": content}
                 if r["tool_calls"]:
                     msg["tool_calls"] = json.loads(r["tool_calls"])
                 if r["tool_call_id"]:
@@ -322,7 +330,7 @@ async def run_agent(agent_id: str, query: str, conversation_id: str = None):
     }
 
 
-async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
+async def stream_agent(agent_id: str, query: Any, conversation_id: str = None):
     """Run agent with agentic loop, yielding SSE events for each step."""
     agent = await get_agent_config(agent_id)
     if not agent:
@@ -347,7 +355,14 @@ async def stream_agent(agent_id: str, query: str, conversation_id: str = None):
             )
             rows = await cursor.fetchall()
             for r in rows:
-                msg = {"role": r["role"], "content": r["content"] if r["content"] is not None else ""}
+                content = r["content"] if r["content"] is not None else ""
+                if content and isinstance(content, str) and content.startswith("["):
+                    try:
+                        content = json.loads(content)
+                    except:
+                        pass
+                        
+                msg = {"role": r["role"], "content": content}
                 if r["tool_calls"]:
                     msg["tool_calls"] = json.loads(r["tool_calls"])
                 if r["tool_call_id"]:

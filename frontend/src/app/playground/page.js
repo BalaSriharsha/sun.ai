@@ -317,10 +317,7 @@ export default function PlaygroundPage() {
                 }
             }
 
-            const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-            const response = await fetch(`${API_BASE}/chat/completions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+            const response = await apiStream(`/chat/completions`, {
                 body: JSON.stringify({
                     provider_id: selectedProvider, model_id: selectedModel,
                     messages: newMessages.map(m => ({ role: m.role, content: m.content })),
@@ -403,10 +400,7 @@ export default function PlaygroundPage() {
 
         try {
             let reqConvId = activeConv?.id;
-            const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-            const response = await fetch(`${API_BASE}/agents/${selectedAgent}/query`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+            const response = await apiStream(`/agents/${selectedAgent}/query`, {
                 body: JSON.stringify({ query: finalUserContent, stream: true, conversation_id: reqConvId, workspace_id: currentWorkspaceId }),
             });
 
