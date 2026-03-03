@@ -1,18 +1,23 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { api, apiStream } from '@/lib/api';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Send, Plus, Trash2, Settings, Bot, User, Loader, MessageSquare, GitBranch, Wrench, Zap, Copy, Edit2, RotateCcw, Check, X, BookOpen, Paperclip, FileText, Image as ImageIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 export default function PlaygroundPage() {
     const { currentWorkspaceId, currentOrgId } = useWorkspace();
-    const [mode, setMode] = useState('chat'); // 'chat' | 'agent' | 'workflow'
+    const searchParams = useSearchParams();
+    const router = useRouter();
+
+    // Initialize state from URL query params for persistence across refreshes
+    const [mode, setMode] = useState(searchParams.get('mode') || 'chat');
     const [providers, setProviders] = useState([]);
     const [allModels, setAllModels] = useState([]);
     const [conversations, setConversations] = useState([]);
-    const [activeConv, setActiveConv] = useState(null);
+    const [activeConv, setActiveConv] = useState(searchParams.get('conv') ? { id: searchParams.get('conv') } : null);
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
@@ -30,18 +35,18 @@ export default function PlaygroundPage() {
 
     // Agent mode state
     const [agents, setAgents] = useState([]);
-    const [selectedAgent, setSelectedAgent] = useState('');
+    const [selectedAgent, setSelectedAgent] = useState(searchParams.get('agent') || '');
     const [agentSteps, setAgentSteps] = useState([]);
 
     // Workflow mode state
     const [workflows, setWorkflows] = useState([]);
-    const [selectedWorkflow, setSelectedWorkflow] = useState('');
+    const [selectedWorkflow, setSelectedWorkflow] = useState(searchParams.get('workflow') || '');
     const [workflowInput, setWorkflowInput] = useState('{}');
     const [workflowResult, setWorkflowResult] = useState(null);
 
     // Knowledge mode state
     const [knowledgeBases, setKnowledgeBases] = useState([]);
-    const [selectedKB, setSelectedKB] = useState('');
+    const [selectedKB, setSelectedKB] = useState(searchParams.get('kb') || '');
     const [knowledgeResults, setKnowledgeResults] = useState(null);
 
     // Attachments State
@@ -110,6 +115,43 @@ export default function PlaygroundPage() {
         }
     }, [mode, selectedAgent, selectedWorkflow, selectedKB, currentWorkspaceId]);
 
+    // ── Sync state to URL query params ──
+    const updateURL = useCallback((overrides = {}) => {
+        const params = new URLSearchParams();
+        const m = overrides.mode ?? mode;
+        const c = overrides.conv ?? activeConv?.id;
+        const a = overrides.agent ?? selectedAgent;
+        const w = overrides.workflow ?? selectedWorkflow;
+        const k = overrides.kb ?? selectedKB;
+
+        if (m && m !== 'chat') params.set('mode', m);
+        if (c) params.set('conv', c);
+        if (m === 'agent' && a) params.set('agent', a);
+        if (m === 'workflow' && w) params.set('workflow', w);
+        if (m === 'knowledge' && k) params.set('kb', k);
+
+        const qs = params.toString();
+        router.replace(`/playground${qs ? '?' + qs : ''}`, { scroll: false });
+    }, [mode, activeConv, selectedAgent, selectedWorkflow, selectedKB, router]);
+
+    useEffect(() => {
+        updateURL();
+    }, [mode, activeConv, selectedAgent, selectedWorkflow, selectedKB]);
+
+    // ── On mount: restore active conversation from URL ──
+    const [initialLoad, setInitialLoad] = useState(true);
+    useEffect(() => {
+        if (!initialLoad) return;
+        const convId = searchParams.get('conv');
+        if (convId && currentWorkspaceId) {
+            // Load messages for the restored conversation
+            loadMessages(convId).then(() => {
+                setActiveConv({ id: convId });
+            });
+        }
+        setInitialLoad(false);
+    }, [currentWorkspaceId]);
+
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, agentSteps, knowledgeResults]);
@@ -138,7 +180,7 @@ export default function PlaygroundPage() {
 
     async function loadConversations() {
         try {
-            if (mode === 'chat') {
+            if (mode === 'chat' || mode === 'knowledge') {
                 const res = await api.getConversations();
                 setConversations(res.conversations || []);
             } else if (mode === 'agent') {
@@ -190,7 +232,9 @@ export default function PlaygroundPage() {
         } else if (mode === 'agent') {
             loadMessages(conv.id);
         } else if (mode === 'knowledge') {
-            // No history viewing for KB queries yet, we just start fresh or show nothing
+            if (conv.provider_id) setSelectedProvider(conv.provider_id);
+            if (conv.model_id) setSelectedModel(conv.model_id);
+            loadMessages(conv.id);
         } else {
             if (conv.provider_id) setSelectedProvider(conv.provider_id);
             if (conv.model_id) setSelectedModel(conv.model_id);
@@ -526,7 +570,7 @@ export default function PlaygroundPage() {
                             { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
                         ].map(tab => (
                             <button key={tab.id}
-                                onClick={() => { setMode(tab.id); startNewChat(); }}
+                                onClick={() => { setMode(tab.id); startNewChat(); updateURL({ mode: tab.id, conv: null }); }}
                                 style={{
                                     padding: '10px 18px', display: 'flex', alignItems: 'center', gap: 6,
                                     fontSize: 13, fontWeight: mode === tab.id ? 600 : 400,
