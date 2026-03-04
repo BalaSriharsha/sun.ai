@@ -46,6 +46,116 @@ class AgentQueryRequest(BaseModel):
     stream: Optional[bool] = True
 
 
+class RunbookGenerateRequest(BaseModel):
+    description: str
+    provider_id: str
+    model_id: str
+    agent_name: Optional[str] = None
+    tools: Optional[List[str]] = []
+
+
+RUNBOOK_GENERATION_PROMPT = """You are an expert at creating AI agent runbooks (system prompts).
+
+Based on the following agent description, generate a comprehensive runbook that includes:
+
+1. **Role Definition**: A clear statement of who the agent is and its primary purpose
+2. **Capabilities**: What the agent can do (based on available tools if provided)
+3. **Behavior Guidelines**: How the agent should interact with users
+4. **Step-by-Step Workflow**: If applicable, the process the agent should follow
+5. **Output Format**: How responses should be structured
+6. **Constraints**: Any limitations or things the agent should avoid
+
+Agent Name: {agent_name}
+Agent Description: {description}
+Available Tools: {tools}
+
+Generate a well-structured runbook in plain text. Be specific and actionable.
+The runbook should be practical and ready to use as a system prompt.
+Do not use markdown headers, just use clear sections with labels."""
+
+
+@router.post("/generate-runbook")
+async def generate_runbook(req: RunbookGenerateRequest, x_user_email: str = Header(...)):
+    """Generate a runbook template based on agent description using LLM."""
+    from services.chat_service import non_stream_chat_completion
+    import time
+
+    start = time.time()
+    db = await get_db()
+    try:
+        # Get provider details
+        cursor = await db.execute("SELECT * FROM providers WHERE id = ?", (req.provider_id,))
+        provider_row = await cursor.fetchone()
+        if not provider_row:
+            raise HTTPException(status_code=404, detail="Provider not found")
+        provider = dict(provider_row)
+
+        # Resolve model_id (UUID to actual model string)
+        actual_model_id = req.model_id
+        cursor = await db.execute("SELECT model_id FROM models WHERE id = ?", (req.model_id,))
+        model_row = await cursor.fetchone()
+        if model_row:
+            actual_model_id = model_row["model_id"]
+
+        # Get tool names if provided
+        tool_names = []
+        if req.tools:
+            for tool_id in req.tools:
+                tc = await db.execute("SELECT name, description FROM tools WHERE id = ?", (tool_id,))
+                trow = await tc.fetchone()
+                if trow:
+                    tool_names.append(f"- {trow['name']}: {trow['description']}")
+
+        tools_str = "\n".join(tool_names) if tool_names else "No specific tools assigned"
+
+        # Build the prompt
+        prompt = RUNBOOK_GENERATION_PROMPT.format(
+            description=req.description,
+            agent_name=req.agent_name or "AI Assistant",
+            tools=tools_str
+        )
+
+        messages = [
+            {"role": "system", "content": "You are an expert at creating AI agent configurations."},
+            {"role": "user", "content": prompt}
+        ]
+
+        # Clean Azure base URL if needed
+        base_url = provider.get("base_url")
+        if provider["type"] == "azure" and base_url:
+            if "/openai/" in base_url:
+                base_url = base_url.split("/openai/")[0]
+            if "cognitiveservices.azure.com" in base_url:
+                base_url = base_url.replace("cognitiveservices.azure.com", "openai.azure.com")
+
+        # Call LLM
+        result = await non_stream_chat_completion(
+            provider_type=provider["type"],
+            model_id=actual_model_id,
+            messages=messages,
+            api_key=provider["api_key_encrypted"],
+            base_url=base_url,
+            api_version=provider.get("api_version"),
+            tools=None,
+            temperature=0.7,
+            max_tokens=2000,
+            provider_id=provider["id"],
+            provider_name=provider["name"],
+            source="runbook_generation",
+        )
+
+        elapsed = int((time.time() - start) * 1000)
+
+        return {
+            "runbook": result.get("content", ""),
+            "generation_time_ms": elapsed,
+            "usage": result.get("usage")
+        }
+
+    finally:
+        await db.close()
+
+
 @router.get("")
 async def list_agents(workspace_id: str, x_user_email: str = Header(...)):
     """List all agents in a workspace."""

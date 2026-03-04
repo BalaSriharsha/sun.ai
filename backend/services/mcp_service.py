@@ -230,7 +230,7 @@ async def discover_mcp_tools(server_id: str, org_id: str = None) -> dict:
 
             # 1) Initialize (using NDJSON format for FastMCP compatibility)
             await _write_ndjson(MCP_INIT_REQUEST)
-            init_resp = await asyncio.wait_for(_read_mcp_ndjson_response(process.stdout, 1), timeout=120)
+            init_resp = await asyncio.wait_for(_read_universal_mcp_response(process.stdout, 1), timeout=120)
             if init_resp is None:
                 return {"error": f"MCP server '{server['name']}' did not respond to initialize"}
 
@@ -244,7 +244,7 @@ async def discover_mcp_tools(server_id: str, org_id: str = None) -> dict:
                 "method": "tools/list",
                 "params": {},
             })
-            tools_resp = await asyncio.wait_for(_read_mcp_ndjson_response(process.stdout, 2), timeout=60)
+            tools_resp = await asyncio.wait_for(_read_universal_mcp_response(process.stdout, 2), timeout=60)
 
             if tools_resp and "result" in tools_resp:
                 tools = tools_resp["result"].get("tools", [])

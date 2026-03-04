@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/lib/WorkspaceContext';
-import { Plus, Bot, Play, Trash2, Edit, X, Wrench, Cpu, Send, ChevronDown, ChevronRight, Server, Share2, GraduationCap, Library } from 'lucide-react';
+import { Plus, Bot, Play, Trash2, Edit, X, Wrench, Cpu, Send, ChevronDown, ChevronRight, Server, Share2, GraduationCap, Library, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import PermissionsModal from '@/components/PermissionsModal';
 import remarkGfm from 'remark-gfm';
@@ -31,6 +31,10 @@ export default function AgentsPage() {
 
     const [allSkills, setAllSkills] = useState([]);
     const [allKbs, setAllKbs] = useState([]);
+
+    // Runbook generation state
+    const [generatingRunbook, setGeneratingRunbook] = useState(false);
+    const [suggestedRunbook, setSuggestedRunbook] = useState(null);
 
     const [form, setForm] = useState({
         name: '', description: '', system_prompt: 'You are a helpful AI assistant.',
@@ -157,6 +161,38 @@ export default function AgentsPage() {
             provider_id: '', model_id: '', tools: [], mcp_servers: [], skills: [], knowledge_bases: [],
             temperature: 0.7, max_tokens: 4096, max_iterations: 10
         });
+        setSuggestedRunbook(null);
+    }
+
+    async function handleGenerateRunbook() {
+        if (!form.description || !form.provider_id || !form.model_id) {
+            alert('Please fill in description, provider, and model first');
+            return;
+        }
+        setGeneratingRunbook(true);
+        setSuggestedRunbook(null);
+        try {
+            const result = await api.generateRunbook({
+                description: form.description,
+                provider_id: form.provider_id,
+                model_id: form.model_id,
+                agent_name: form.name,
+                tools: form.tools
+            });
+            setSuggestedRunbook(result.runbook);
+        } catch (e) {
+            alert('Failed to generate runbook: ' + e.message);
+        }
+        setGeneratingRunbook(false);
+    }
+
+    function acceptSuggestedRunbook() {
+        setForm({ ...form, system_prompt: suggestedRunbook });
+        setSuggestedRunbook(null);
+    }
+
+    function dismissSuggestedRunbook() {
+        setSuggestedRunbook(null);
     }
 
     function toggleTool(toolId) {
@@ -404,7 +440,79 @@ export default function AgentsPage() {
                                     {/* Center Column: Runbook */}
                                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                                         <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', marginBottom: 0 }}>
-                                            <label className="form-label">Runbook</label>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                                <label className="form-label" style={{ marginBottom: 0 }}>Runbook</label>
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-ghost btn-sm"
+                                                    onClick={handleGenerateRunbook}
+                                                    disabled={generatingRunbook || !form.description || !form.provider_id || !form.model_id}
+                                                    style={{ gap: 6 }}
+                                                    title={!form.description ? 'Add a description first' : !form.provider_id || !form.model_id ? 'Select provider and model first' : 'Generate runbook from description'}
+                                                >
+                                                    {generatingRunbook ? (
+                                                        <>
+                                                            <div className="loading-spinner" style={{ width: 12, height: 12 }} />
+                                                            Generating...
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Sparkles size={14} />
+                                                            Generate
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </div>
+
+                                            {suggestedRunbook && (
+                                                <div style={{
+                                                    padding: 12,
+                                                    background: 'rgba(124, 58, 237, 0.08)',
+                                                    borderRadius: 'var(--radius-md)',
+                                                    marginBottom: 12,
+                                                    border: '1px solid rgba(124, 58, 237, 0.3)'
+                                                }}>
+                                                    <div style={{
+                                                        display: 'flex',
+                                                        justifyContent: 'space-between',
+                                                        alignItems: 'center',
+                                                        marginBottom: 8
+                                                    }}>
+                                                        <span style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                            <Sparkles size={14} style={{ color: 'var(--accent)' }} />
+                                                            AI-Generated Runbook
+                                                        </span>
+                                                        <div style={{ display: 'flex', gap: 8 }}>
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-primary btn-sm"
+                                                                onClick={acceptSuggestedRunbook}
+                                                            >
+                                                                Accept
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-ghost btn-sm"
+                                                                onClick={dismissSuggestedRunbook}
+                                                            >
+                                                                Dismiss
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{
+                                                        maxHeight: 150,
+                                                        overflowY: 'auto',
+                                                        fontSize: 12,
+                                                        fontFamily: 'var(--font-mono)',
+                                                        whiteSpace: 'pre-wrap',
+                                                        color: 'var(--text-secondary)',
+                                                        lineHeight: 1.5
+                                                    }}>
+                                                        {suggestedRunbook.length > 600 ? suggestedRunbook.slice(0, 600) + '...' : suggestedRunbook}
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             <textarea className="form-textarea" value={form.system_prompt}
                                                 onChange={e => setForm({ ...form, system_prompt: e.target.value })}
                                                 style={{ flex: 1, resize: 'none', minHeight: 400, fontSize: 13, fontFamily: 'var(--font-mono)' }}

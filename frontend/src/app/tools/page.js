@@ -1,29 +1,74 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
-import { Plus, Wrench, Code, Play, Trash2, Edit, Search, Globe, Terminal, FileText, Braces, X } from 'lucide-react';
+import { Plus, Wrench, Code, Play, Trash2, Edit, Globe, Terminal, FileText, Braces, X, Upload, CheckCircle, AlertCircle, Download, Sparkles, Package, Search, Database, Calculator, Clock, FolderOpen, Type } from 'lucide-react';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
-const BUILT_IN_ICONS = {
-    web_search: Globe,
-    http_request: Globe,
-    code_execute: Terminal,
-    json_transform: Braces,
-    text_extract: FileText,
+// Category icons mapping
+const CATEGORY_ICONS = {
+    search: Search,
+    network: Globe,
+    compute: Terminal,
+    data: Database,
+    math: Calculator,
+    utility: Clock,
+    filesystem: FolderOpen,
+    text: Type,
+    custom: Code,
+    uploaded: Package,
+};
+
+// Category colors
+const CATEGORY_COLORS = {
+    search: { bg: 'rgba(59, 130, 246, 0.12)', color: '#3b82f6' },
+    network: { bg: 'rgba(16, 185, 129, 0.12)', color: '#10b981' },
+    compute: { bg: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b' },
+    data: { bg: 'rgba(139, 92, 246, 0.12)', color: '#8b5cf6' },
+    math: { bg: 'rgba(236, 72, 153, 0.12)', color: '#ec4899' },
+    utility: { bg: 'rgba(6, 182, 212, 0.12)', color: '#06b6d4' },
+    filesystem: { bg: 'rgba(234, 179, 8, 0.12)', color: '#eab308' },
+    text: { bg: 'rgba(99, 102, 241, 0.12)', color: '#6366f1' },
+    custom: { bg: 'rgba(107, 114, 128, 0.12)', color: '#6b7280' },
+    uploaded: { bg: 'rgba(124, 58, 237, 0.12)', color: '#7c3aed' },
 };
 
 export default function ToolsPage() {
+    const { currentOrgId } = useWorkspace();
     const [tools, setTools] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [editingTool, setEditingTool] = useState(null);
     const [testResult, setTestResult] = useState(null);
     const [testingId, setTestingId] = useState(null);
-    const [filter, setFilter] = useState('all');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedCategory, setSelectedCategory] = useState('all');
     const [form, setForm] = useState({
         name: '', description: '', tool_type: 'custom', parameters_schema: '{}', code: ''
     });
 
+    // Upload Tool Pack state
+    const [showUploadModal, setShowUploadModal] = useState(false);
+    const [uploadFile, setUploadFile] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const [uploadResult, setUploadResult] = useState(null);
+
+    // Generate Tool Pack state
+    const [showGenerateModal, setShowGenerateModal] = useState(false);
+    const [providers, setProviders] = useState([]);
+    const [allModels, setAllModels] = useState({});
+    const [generating, setGenerating] = useState(false);
+    const [generateForm, setGenerateForm] = useState({
+        name: '',
+        description: '',
+        provider_id: '',
+        model_id: ''
+    });
+
     useEffect(() => { loadTools(); }, []);
+
+    useEffect(() => {
+        if (currentOrgId) loadProviders();
+    }, [currentOrgId]);
 
     async function loadTools() {
         try {
@@ -33,10 +78,25 @@ export default function ToolsPage() {
         setLoading(false);
     }
 
+    async function loadProviders() {
+        if (!currentOrgId) return;
+        try {
+            const res = await api.getProviders(currentOrgId);
+            setProviders(res.providers || []);
+            const models = {};
+            for (const p of (res.providers || [])) {
+                try {
+                    const mr = await api.getProviderModels(p.id);
+                    models[p.id] = mr.models || [];
+                } catch (e) { models[p.id] = []; }
+            }
+            setAllModels(models);
+        } catch (e) { console.error(e); }
+    }
+
     async function handleSave(e) {
         e.preventDefault();
         try {
-            // Parse parameters_schema from string to object
             let parsedSchema = {};
             try {
                 parsedSchema = JSON.parse(form.parameters_schema || '{}');
@@ -85,9 +145,12 @@ export default function ToolsPage() {
         setTestingId(null);
     }
 
+    function handleDownload(tool) {
+        api.downloadTool(tool.id);
+    }
+
     function openEdit(tool) {
         setEditingTool(tool);
-        // Convert parameters_schema to string if it's an object
         let schemaStr = '{}';
         if (tool.parameters_schema) {
             schemaStr = typeof tool.parameters_schema === 'string'
@@ -104,9 +167,75 @@ export default function ToolsPage() {
         setShowModal(true);
     }
 
-    const filtered = filter === 'all' ? tools :
-        filter === 'builtin' ? tools.filter(t => t.tool_type === 'builtin') :
-            tools.filter(t => t.tool_type === 'custom');
+    // Upload handlers
+    function handleFileSelect(e) {
+        const file = e.target.files?.[0];
+        if (file && file.name.endsWith('.zip')) {
+            setUploadFile(file);
+        }
+        e.target.value = '';
+    }
+
+    async function handleUpload() {
+        if (!uploadFile) return;
+        setUploading(true);
+        setUploadResult(null);
+        try {
+            const result = await api.uploadToolPack(uploadFile);
+            setUploadResult(result);
+            if (result.total_created > 0) {
+                loadTools();
+            }
+        } catch (e) {
+            setUploadResult({ error: e.message });
+        }
+        setUploading(false);
+    }
+
+    function closeUploadModal() {
+        setShowUploadModal(false);
+        setUploadFile(null);
+        setUploadResult(null);
+    }
+
+    // Generate handlers
+    async function handleGenerateToolPack() {
+        if (!generateForm.name || !generateForm.description || !generateForm.provider_id || !generateForm.model_id) {
+            alert('Please fill in all fields');
+            return;
+        }
+        setGenerating(true);
+        try {
+            const { blob, filename } = await api.generateToolPack(generateForm);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            setShowGenerateModal(false);
+            setGenerateForm({ name: '', description: '', provider_id: '', model_id: '' });
+        } catch (e) {
+            alert('Failed to generate tool pack: ' + e.message);
+        }
+        setGenerating(false);
+    }
+
+    // Get unique categories
+    const categories = ['all', ...new Set(tools.map(t => t.category || 'custom'))];
+
+    // Filter tools
+    const filteredTools = tools.filter(tool => {
+        const matchesSearch = !searchQuery ||
+            tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (tool.description || '').toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesCategory = selectedCategory === 'all' || tool.category === selectedCategory;
+        return matchesSearch && matchesCategory;
+    });
+
+    const currentGenerateModels = allModels[generateForm.provider_id] || [];
 
     return (
         <div className="animate-fade">
@@ -116,9 +245,15 @@ export default function ToolsPage() {
                         <Wrench className="page-title-icon" />
                         Tools
                     </h1>
-                    <p className="page-subtitle">Built-in and custom tools for AI agents</p>
+                    <p className="page-subtitle">Manage tools for your AI agents</p>
                 </div>
                 <div className="header-actions">
+                    <button className="btn btn-ghost" onClick={() => setShowGenerateModal(true)}>
+                        <Sparkles size={16} /> Generate
+                    </button>
+                    <button className="btn btn-secondary" onClick={() => setShowUploadModal(true)}>
+                        <Upload size={16} /> Upload
+                    </button>
                     <button className="btn btn-primary" onClick={() => {
                         setEditingTool(null);
                         setForm({ name: '', description: '', tool_type: 'custom', parameters_schema: '{}', code: '' });
@@ -129,57 +264,204 @@ export default function ToolsPage() {
                 </div>
             </header>
 
-            <div className="tabs" style={{ maxWidth: 360 }}>
-                {['all', 'builtin', 'custom'].map(f => (
-                    <button key={f} className={`tab ${filter === f ? 'active' : ''}`}
-                        onClick={() => setFilter(f)}>
-                        {f === 'all' ? 'All Tools' : f === 'builtin' ? 'Built-in' : 'Custom'}
-                    </button>
-                ))}
+            {/* Search and Filter Bar */}
+            <div style={{
+                display: 'flex',
+                gap: 16,
+                marginBottom: 24,
+                flexWrap: 'wrap',
+                alignItems: 'center'
+            }}>
+                <div style={{ position: 'relative', flex: '1 1 300px', maxWidth: 400 }}>
+                    <Search size={16} style={{
+                        position: 'absolute',
+                        left: 12,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: 'var(--text-tertiary)'
+                    }} />
+                    <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Search tools..."
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        style={{ paddingLeft: 38 }}
+                    />
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {categories.map(cat => (
+                        <button
+                            key={cat}
+                            className={`btn btn-sm ${selectedCategory === cat ? 'btn-primary' : 'btn-ghost'}`}
+                            onClick={() => setSelectedCategory(cat)}
+                            style={{ textTransform: 'capitalize' }}
+                        >
+                            {cat === 'all' ? 'All' : cat}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {/* Tools count */}
+            <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--text-secondary)' }}>
+                {filteredTools.length} tool{filteredTools.length !== 1 ? 's' : ''}
+                {searchQuery && ` matching "${searchQuery}"`}
+                {selectedCategory !== 'all' && ` in ${selectedCategory}`}
             </div>
 
             {loading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
                     <div className="loading-spinner" />
                 </div>
+            ) : filteredTools.length === 0 ? (
+                <div style={{
+                    textAlign: 'center',
+                    padding: 60,
+                    color: 'var(--text-secondary)'
+                }}>
+                    <Package size={48} style={{ marginBottom: 16, opacity: 0.5 }} />
+                    <p style={{ fontSize: 16, marginBottom: 8 }}>No tools found</p>
+                    <p style={{ fontSize: 13 }}>
+                        {searchQuery ? 'Try a different search term' : 'Create your first tool or upload a tool pack'}
+                    </p>
+                </div>
             ) : (
-                <div className="grid-auto">
-                    {filtered.map(tool => {
-                        const Icon = BUILT_IN_ICONS[tool.name] || Code;
-                        const isBuiltIn = tool.tool_type === 'builtin';
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                    gap: 16
+                }}>
+                    {filteredTools.map(tool => {
+                        const category = tool.category || 'custom';
+                        const Icon = CATEGORY_ICONS[category] || Code;
+                        const colors = CATEGORY_COLORS[category] || CATEGORY_COLORS.custom;
+                        const isCustom = tool.tool_type !== 'builtin';
+
                         return (
-                            <div key={tool.id} className="tool-card">
-                                <div className="card-header" style={{ marginBottom: 10 }}>
-                                    <div className="tool-card-icon" style={{
-                                        background: isBuiltIn ? 'rgba(124, 58, 237, 0.12)' : 'rgba(6, 182, 212, 0.12)',
-                                        color: isBuiltIn ? 'var(--accent)' : 'var(--cyan)',
-                                        marginBottom: 0
+                            <div key={tool.id} style={{
+                                background: 'var(--bg-secondary)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: 'var(--radius-lg)',
+                                padding: 20,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                transition: 'border-color 0.2s, box-shadow 0.2s',
+                            }}
+                            onMouseEnter={e => {
+                                e.currentTarget.style.borderColor = 'var(--accent)';
+                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                            }}
+                            onMouseLeave={e => {
+                                e.currentTarget.style.borderColor = 'var(--border-color)';
+                                e.currentTarget.style.boxShadow = 'none';
+                            }}
+                            >
+                                {/* Header */}
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                                    <div style={{
+                                        width: 40,
+                                        height: 40,
+                                        borderRadius: 'var(--radius-md)',
+                                        background: colors.bg,
+                                        color: colors.color,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        flexShrink: 0
                                     }}>
                                         <Icon size={20} />
                                     </div>
-                                    <span className={`badge ${isBuiltIn ? 'badge-info' : 'badge-neutral'}`}>
-                                        {isBuiltIn ? 'Built-in' : 'Custom'}
-                                    </span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <h3 style={{
+                                            fontSize: 15,
+                                            fontWeight: 600,
+                                            marginBottom: 2,
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {tool.name}
+                                        </h3>
+                                        <span style={{
+                                            fontSize: 11,
+                                            padding: '2px 8px',
+                                            borderRadius: 'var(--radius-sm)',
+                                            background: colors.bg,
+                                            color: colors.color,
+                                            textTransform: 'capitalize'
+                                        }}>
+                                            {category}
+                                        </span>
+                                    </div>
                                 </div>
-                                <h3>{tool.name}</h3>
-                                <p style={{ marginBottom: 12 }}>{tool.description || 'No description'}</p>
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                    <button className="btn btn-secondary btn-sm" onClick={() => handleTest(tool)}>
-                                        <Play size={12} /> Test
+
+                                {/* Description */}
+                                <p style={{
+                                    fontSize: 13,
+                                    color: 'var(--text-secondary)',
+                                    marginBottom: 16,
+                                    flex: 1,
+                                    lineHeight: 1.5,
+                                    display: '-webkit-box',
+                                    WebkitLineClamp: 2,
+                                    WebkitBoxOrient: 'vertical',
+                                    overflow: 'hidden'
+                                }}>
+                                    {tool.description || 'No description'}
+                                </p>
+
+                                {/* Actions */}
+                                <div style={{
+                                    display: 'flex',
+                                    gap: 8,
+                                    borderTop: '1px solid var(--border-color)',
+                                    paddingTop: 12,
+                                    marginTop: 'auto'
+                                }}>
+                                    <button
+                                        className="btn btn-ghost btn-sm"
+                                        onClick={() => handleDownload(tool)}
+                                        title="Download as tool pack"
+                                    >
+                                        <Download size={14} />
                                     </button>
-                                    {!isBuiltIn && (
+                                    <button
+                                        className="btn btn-ghost btn-sm"
+                                        onClick={() => handleTest(tool)}
+                                        title="Test tool"
+                                    >
+                                        <Play size={14} />
+                                    </button>
+                                    {isCustom && (
                                         <>
-                                            <button className="btn btn-ghost btn-sm" onClick={() => openEdit(tool)}>
-                                                <Edit size={12} /> Edit
+                                            <button
+                                                className="btn btn-ghost btn-sm"
+                                                onClick={() => openEdit(tool)}
+                                                title="Edit tool"
+                                            >
+                                                <Edit size={14} />
                                             </button>
-                                            <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(tool.id)}>
-                                                <Trash2 size={12} />
+                                            <button
+                                                className="btn btn-ghost btn-sm"
+                                                onClick={() => handleDelete(tool.id)}
+                                                title="Delete tool"
+                                                style={{ marginLeft: 'auto' }}
+                                            >
+                                                <Trash2 size={14} />
                                             </button>
                                         </>
                                     )}
                                 </div>
+
+                                {/* Test Result */}
                                 {testResult?.id === tool.id && (
-                                    <div className="code-block" style={{ marginTop: 10, maxHeight: 200, overflow: 'auto', fontSize: 12 }}>
+                                    <div className="code-block" style={{
+                                        marginTop: 12,
+                                        maxHeight: 150,
+                                        overflow: 'auto',
+                                        fontSize: 11
+                                    }}>
                                         {JSON.stringify(testResult.result, null, 2)}
                                     </div>
                                 )}
@@ -189,66 +471,266 @@ export default function ToolsPage() {
                 </div>
             )}
 
+            {/* Create/Edit Modal */}
             {showModal && (
                 <div className="modal-overlay" onClick={() => setShowModal(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()} style={{ width: '90vw', maxWidth: 1200, height: '85vh', maxHeight: 800, display: 'flex', flexDirection: 'column', padding: '24px 32px' }}>
+                    <div className="modal" onClick={e => e.stopPropagation()} style={{
+                        width: '90vw',
+                        maxWidth: 1000,
+                        height: '80vh',
+                        maxHeight: 700,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        padding: '24px 32px'
+                    }}>
                         <div className="modal-header">
-                            <h2 className="modal-title">{editingTool ? 'Edit Tool' : 'Create Custom Tool'}</h2>
-                            <button className="btn btn-ghost btn-icon" onClick={() => setShowModal(false)}><X size={18} /></button>
+                            <h2 className="modal-title">{editingTool ? 'Edit Tool' : 'Create Tool'}</h2>
+                            <button className="btn btn-ghost btn-icon" onClick={() => setShowModal(false)}>
+                                <X size={18} />
+                            </button>
                         </div>
                         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(250px, 300px) 1fr minmax(250px, 300px)', gap: 32, flex: 1, overflowY: 'auto', paddingRight: 8 }}>
-                                
-                                {/* Left Column: Info */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 24, flex: 1, overflowY: 'auto' }}>
+                                {/* Left: Info */}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                                     <div className="form-group" style={{ marginBottom: 0 }}>
-                                        <label className="form-label">Tool Name</label>
+                                        <label className="form-label">Name</label>
                                         <input className="form-input" required value={form.name}
-                                            onChange={e => setForm({ ...form, name: e.target.value })} placeholder="my_custom_tool" />
-                                    </div>
-                                    <div className="form-group" style={{ marginBottom: 0 }}>
-                                        <label className="form-label">Type</label>
-                                        <select className="form-select" value={form.tool_type}
-                                            onChange={e => setForm({ ...form, tool_type: e.target.value })}>
-                                            <option value="custom">Custom</option>
-                                        </select>
+                                            onChange={e => setForm({ ...form, name: e.target.value })}
+                                            placeholder="my_tool" />
                                     </div>
                                     <div className="form-group" style={{ marginBottom: 0 }}>
                                         <label className="form-label">Description</label>
                                         <textarea className="form-textarea" value={form.description}
                                             onChange={e => setForm({ ...form, description: e.target.value })}
-                                            placeholder="What this tool does..." rows={4} style={{ resize: 'vertical' }} />
+                                            placeholder="What this tool does..."
+                                            rows={3}
+                                            style={{ resize: 'vertical' }} />
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
+                                        <label className="form-label">Parameters (JSON Schema)</label>
+                                        <textarea className="form-textarea" value={form.parameters_schema}
+                                            onChange={e => setForm({ ...form, parameters_schema: e.target.value })}
+                                            style={{ flex: 1, minHeight: 120, resize: 'none', fontFamily: 'var(--font-mono)', fontSize: 12 }}
+                                            placeholder='{"query": {"type": "string"}}' />
                                     </div>
                                 </div>
 
-                                {/* Middle Column: Python Code */}
+                                {/* Right: Code */}
                                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                                     <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', marginBottom: 0 }}>
                                         <label className="form-label">Python Code</label>
                                         <textarea className="form-textarea" value={form.code}
                                             onChange={e => setForm({ ...form, code: e.target.value })}
-                                            style={{ flex: 1, resize: 'none', fontFamily: 'var(--font-mono)', fontSize: 13 }}
-                                            placeholder='def execute(params):\n    # Your tool logic here\n    return {"result": params.get("input")}' />
-                                    </div>
-                                </div>
-
-                                {/* Right Column: Parameters Schema */}
-                                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <div className="form-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', marginBottom: 0 }}>
-                                        <label className="form-label">Parameters Schema (JSON)</label>
-                                        <textarea className="form-textarea" value={form.parameters_schema}
-                                            onChange={e => setForm({ ...form, parameters_schema: e.target.value })}
-                                            style={{ flex: 1, resize: 'none', fontFamily: 'var(--font-mono)', fontSize: 13 }}
-                                            placeholder='{"query": {"type": "string", "description": "Search query"}}' />
+                                            style={{ flex: 1, resize: 'none', fontFamily: 'var(--font-mono)', fontSize: 12 }}
+                                            placeholder="# Your code here&#10;result = {'output': params.get('input')}" />
                                     </div>
                                 </div>
                             </div>
-                            
-                            <div className="modal-actions" style={{ paddingTop: 20, marginTop: 20, borderTop: '1px solid var(--border-color)' }}>
+
+                            <div className="modal-actions" style={{ paddingTop: 16, marginTop: 16, borderTop: '1px solid var(--border-color)' }}>
                                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-primary">{editingTool ? 'Update' : 'Create'} Tool</button>
+                                <button type="submit" className="btn btn-primary">{editingTool ? 'Update' : 'Create'}</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Upload Modal */}
+            {showUploadModal && (
+                <div className="modal-overlay" onClick={closeUploadModal}>
+                    <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
+                        <div className="modal-header">
+                            <h2 className="modal-title">Upload Tool Pack</h2>
+                            <button className="btn btn-ghost btn-icon" onClick={closeUploadModal}><X size={18} /></button>
+                        </div>
+
+                        <div style={{ padding: '0 24px 24px' }}>
+                            <p style={{ marginBottom: 16, color: 'var(--text-secondary)', fontSize: 13 }}>
+                                Upload a .zip file with Python files. Each function becomes a tool.
+                            </p>
+
+                            <div
+                                style={{
+                                    border: '2px dashed var(--border-color)',
+                                    borderRadius: 'var(--radius-md)',
+                                    padding: 32,
+                                    textAlign: 'center',
+                                    cursor: 'pointer',
+                                    marginBottom: 16
+                                }}
+                                onClick={() => document.getElementById('tool-pack-input').click()}
+                                onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent)'; }}
+                                onDragLeave={e => { e.currentTarget.style.borderColor = 'var(--border-color)'; }}
+                                onDrop={e => {
+                                    e.preventDefault();
+                                    e.currentTarget.style.borderColor = 'var(--border-color)';
+                                    const file = Array.from(e.dataTransfer.files).find(f => f.name.endsWith('.zip'));
+                                    if (file) setUploadFile(file);
+                                }}
+                            >
+                                <Upload size={28} style={{ marginBottom: 8, color: 'var(--text-tertiary)' }} />
+                                <p style={{ fontWeight: 500, fontSize: 14 }}>Drop .zip file here or click to browse</p>
+                            </div>
+
+                            <input
+                                id="tool-pack-input"
+                                type="file"
+                                accept=".zip"
+                                style={{ display: 'none' }}
+                                onChange={handleFileSelect}
+                            />
+
+                            {uploadFile && (
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                    padding: 12,
+                                    background: 'var(--bg-tertiary)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    marginBottom: 16
+                                }}>
+                                    <Package size={18} style={{ color: 'var(--accent)' }} />
+                                    <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 13 }}>{uploadFile.name}</span>
+                                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setUploadFile(null)}>
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            )}
+
+                            {uploadResult && (
+                                <div style={{ marginBottom: 16 }}>
+                                    {uploadResult.error ? (
+                                        <div style={{
+                                            padding: 12,
+                                            background: 'rgba(239, 68, 68, 0.1)',
+                                            borderRadius: 'var(--radius-md)',
+                                            color: 'var(--error)',
+                                            fontSize: 13
+                                        }}>
+                                            <AlertCircle size={16} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+                                            {uploadResult.error}
+                                        </div>
+                                    ) : uploadResult.total_created > 0 && (
+                                        <div style={{
+                                            padding: 12,
+                                            background: 'rgba(34, 197, 94, 0.1)',
+                                            borderRadius: 'var(--radius-md)',
+                                            color: 'var(--success)',
+                                            fontSize: 13
+                                        }}>
+                                            <CheckCircle size={16} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+                                            {uploadResult.total_created} tool{uploadResult.total_created !== 1 ? 's' : ''} created
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="modal-actions">
+                            <button type="button" className="btn btn-secondary" onClick={closeUploadModal}>
+                                {uploadResult?.total_created > 0 ? 'Done' : 'Cancel'}
+                            </button>
+                            {!uploadResult?.total_created && (
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={handleUpload}
+                                    disabled={!uploadFile || uploading}
+                                >
+                                    {uploading ? 'Uploading...' : 'Upload'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Generate Modal */}
+            {showGenerateModal && (
+                <div className="modal-overlay" onClick={() => setShowGenerateModal(false)}>
+                    <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+                        <div className="modal-header">
+                            <h2 className="modal-title">
+                                <Sparkles size={18} style={{ marginRight: 8, color: 'var(--accent)' }} />
+                                Generate Tool Pack
+                            </h2>
+                            <button className="btn btn-ghost btn-icon" onClick={() => setShowGenerateModal(false)}>
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div style={{ padding: '0 24px 24px' }}>
+                            <p style={{ marginBottom: 16, color: 'var(--text-secondary)', fontSize: 13 }}>
+                                Describe the tools you need and AI will generate them.
+                            </p>
+
+                            <div className="form-group">
+                                <label className="form-label">Name</label>
+                                <input
+                                    className="form-input"
+                                    placeholder="e.g., Data Processing Tools"
+                                    value={generateForm.name}
+                                    onChange={e => setGenerateForm({ ...generateForm, name: e.target.value })}
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label className="form-label">Description</label>
+                                <textarea
+                                    className="form-textarea"
+                                    rows={3}
+                                    placeholder="Describe what tools you need..."
+                                    value={generateForm.description}
+                                    onChange={e => setGenerateForm({ ...generateForm, description: e.target.value })}
+                                />
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label">Provider</label>
+                                    <select
+                                        className="form-select"
+                                        value={generateForm.provider_id}
+                                        onChange={e => setGenerateForm({ ...generateForm, provider_id: e.target.value, model_id: '' })}
+                                    >
+                                        <option value="">Select</option>
+                                        {providers.map(p => (
+                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label">Model</label>
+                                    <select
+                                        className="form-select"
+                                        value={generateForm.model_id}
+                                        onChange={e => setGenerateForm({ ...generateForm, model_id: e.target.value })}
+                                        disabled={!generateForm.provider_id}
+                                    >
+                                        <option value="">Select</option>
+                                        {currentGenerateModels.map(m => (
+                                            <option key={m.id} value={m.model_id}>{m.model_id}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="modal-actions">
+                            <button type="button" className="btn btn-secondary" onClick={() => setShowGenerateModal(false)}>
+                                Cancel
+                            </button>
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleGenerateToolPack}
+                                disabled={!generateForm.name || !generateForm.description || !generateForm.provider_id || !generateForm.model_id || generating}
+                            >
+                                {generating ? 'Generating...' : 'Generate & Download'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

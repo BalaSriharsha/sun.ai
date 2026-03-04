@@ -23,8 +23,6 @@ const navItems = [
         section: 'Build', items: [
             { href: '/providers', label: 'AI Providers', icon: Cpu },
             { href: '/agents', label: 'Agents', icon: Bot },
-            { href: '/skills', label: 'Skills', icon: GraduationCap },
-            { href: '/knowledge', label: 'Knowledge', icon: Library },
             { href: '/playground', label: 'Playground', icon: MessageSquare },
             { href: '/workflows', label: 'Workflows', icon: GitBranch },
         ]
@@ -32,6 +30,8 @@ const navItems = [
     {
         section: 'Integrate', items: [
             { href: '/tools', label: 'Tools', icon: Wrench },
+            { href: '/skills', label: 'Skills', icon: GraduationCap },
+            { href: '/knowledge', label: 'Knowledge', icon: Library },
             { href: '/mcp', label: 'MCP Servers', icon: Server },
         ]
     },
