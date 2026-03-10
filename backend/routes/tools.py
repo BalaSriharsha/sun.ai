@@ -10,6 +10,7 @@ import uuid
 import json
 import zipfile
 import io
+import os
 
 router = APIRouter()
 
@@ -947,7 +948,6 @@ async def generate_tool_pack(req: ToolPackGenerateRequest):
             api_version=provider.get("api_version"),
             tools=None,
             temperature=0.7,
-            max_tokens=4000,
             provider_id=provider["id"],
             provider_name=provider["name"],
             source="tool_pack_generation",
@@ -1021,6 +1021,9 @@ async def upload_tool_pack(file: UploadFile = File(...)):
     if not file.filename.endswith('.zip'):
         raise HTTPException(status_code=400, detail="Only .zip files are supported")
 
+    # Derive a clean pack name from the zip filename (no extension)
+    pack_name = os.path.splitext(file.filename)[0]
+
     db = await get_db()
     created_tools = []
     errors = []
@@ -1076,24 +1079,24 @@ async def upload_tool_pack(file: UploadFile = File(...)):
                             })
                             continue
 
-                        # Create the tool
+                        # Create the tool, recording the pack it came from
                         tool_id = str(uuid.uuid4())
                         now = datetime.utcnow().isoformat()
 
                         await db.execute(
                             """INSERT INTO tools (id, name, description, type, category,
-                               parameters_schema, code, is_enabled, created_at, updated_at)
-                               VALUES (?, ?, ?, 'custom', 'uploaded', ?, ?, 1, ?, ?)""",
+                               parameters_schema, code, source_file, is_enabled, created_at, updated_at)
+                               VALUES (?, ?, ?, 'custom', 'uploaded', ?, ?, ?, 1, ?, ?)""",
                             (tool_id, tool_def["name"], tool_def["description"],
                              json.dumps(tool_def["parameters_schema"]),
-                             tool_def["code"], now, now)
+                             tool_def["code"], pack_name, now, now)
                         )
 
                         created_tools.append({
                             "id": tool_id,
                             "name": tool_def["name"],
                             "description": tool_def["description"][:200] if tool_def["description"] else "",
-                            "source_file": py_filename
+                            "source_file": pack_name
                         })
 
         except zipfile.BadZipFile:
@@ -1107,6 +1110,24 @@ async def upload_tool_pack(file: UploadFile = File(...)):
             "total_created": len(created_tools),
             "total_skipped": len(errors)
         }
+    finally:
+        await db.close()
+
+
+@router.delete("/by-pack/{pack_name}")
+async def delete_tool_pack(pack_name: str):
+    """Delete all tools that belong to a specific uploaded pack."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT id FROM tools WHERE source_file = ?", (pack_name,)
+        )
+        rows = await cursor.fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"No tools found for pack '{pack_name}'")
+        await db.execute("DELETE FROM tools WHERE source_file = ?", (pack_name,))
+        await db.commit()
+        return {"deleted": True, "count": len(rows), "pack_name": pack_name}
     finally:
         await db.close()
 

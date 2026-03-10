@@ -165,7 +165,7 @@ async def non_stream_chat_completion(
     api_version: str = None,
     tools: list = None,
     temperature: float = 0.7,
-    max_tokens: int = 4096,
+    max_tokens: int = None,
     provider_id: str = None,
     provider_name: str = None,
     conversation_id: str = None,
@@ -178,9 +178,10 @@ async def non_stream_chat_completion(
         "model": litellm_model,
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": max_tokens,
         "stream": False,
     }
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
 
     # Handle provider-specific authentication
     if provider_type == "bedrock":

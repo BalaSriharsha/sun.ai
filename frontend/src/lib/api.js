@@ -95,6 +95,7 @@ export const api = {
     getTool: (id) => apiFetch(`/tools/${id}`),
     updateTool: (id, data) => apiFetch(`/tools/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteTool: (id) => apiFetch(`/tools/${id}`, { method: 'DELETE' }),
+    deleteToolPack: (packName) => apiFetch(`/tools/by-pack/${encodeURIComponent(packName)}`, { method: 'DELETE' }),
     testTool: (id, params) => apiFetch(`/tools/${id}/test`, { method: 'POST', body: JSON.stringify({ parameters: params }) }),
     downloadTool: (id) => {
         const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';

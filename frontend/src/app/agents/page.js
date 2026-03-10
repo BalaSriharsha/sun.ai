@@ -2,11 +2,62 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import { useWorkspace } from '@/lib/WorkspaceContext';
-import { Plus, Bot, Play, Trash2, Edit, X, Wrench, Cpu, Send, ChevronDown, ChevronRight, Server, Share2, GraduationCap, Library, Sparkles } from 'lucide-react';
+import { Plus, Bot, Play, Trash2, Edit, X, Wrench, Cpu, Send, ChevronDown, ChevronRight, Server, Share2, GraduationCap, Library, Sparkles, Package } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import PermissionsModal from '@/components/PermissionsModal';
 import remarkGfm from 'remark-gfm';
 import { useAuth } from '@clerk/nextjs';
+
+/** Collapsible row representing one uploaded tool pack, with a select-all checkbox. */
+function ToolPackGroup({ packName, packTools, selectedCount, allSelected, someSelected, selectedTools, onTogglePack, onToggleTool }) {
+    const [expanded, setExpanded] = useState(false);
+    const accentColor = allSelected ? 'var(--accent)' : someSelected ? 'var(--warning, #f59e0b)' : 'transparent';
+    const bgColor = allSelected ? 'rgba(124, 58, 237, 0.1)' : someSelected ? 'rgba(245, 158, 11, 0.06)' : 'transparent';
+
+    return (
+        <div style={{ borderRadius: 'var(--radius-sm)', border: `1px solid ${accentColor}`, overflow: 'hidden', background: bgColor }}>
+            {/* Pack header row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', cursor: 'pointer' }}>
+                <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected; }}
+                    onChange={onTogglePack}
+                    onClick={e => e.stopPropagation()}
+                    style={{ cursor: 'pointer', flexShrink: 0 }}
+                />
+                <Package size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{packName}</span>
+                <span style={{
+                    fontSize: 11, padding: '1px 7px', borderRadius: 99,
+                    background: allSelected ? 'rgba(124, 58, 237, 0.2)' : 'rgba(255,255,255,0.06)',
+                    color: allSelected ? 'var(--accent)' : 'var(--text-tertiary)'
+                }}>
+                    {selectedCount}/{packTools.length}
+                </span>
+                <span onClick={() => setExpanded(e => !e)} style={{ display: 'flex', alignItems: 'center', padding: '0 4px' }}>
+                    {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                </span>
+            </div>
+            {/* Expanded individual tools */}
+            {expanded && (
+                <div style={{ borderTop: '1px solid var(--border-color)', padding: '4px 8px 8px 32px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {packTools.map(tool => (
+                        <label key={tool.id} style={{
+                            display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+                            borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 12,
+                            background: selectedTools.includes(tool.id) ? 'rgba(124, 58, 237, 0.08)' : 'transparent',
+                        }}>
+                            <input type="checkbox" checked={selectedTools.includes(tool.id)} onChange={() => onToggleTool(tool.id)} />
+                            <span style={{ fontFamily: 'var(--font-mono)' }}>{tool.name}</span>
+                        </label>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 
 export default function AgentsPage() {
     const { currentWorkspaceId, currentOrgId, currentWorkspace } = useWorkspace();
@@ -220,6 +271,17 @@ export default function AgentsPage() {
         setForm(f => ({
             ...f,
             knowledge_bases: f.knowledge_bases.includes(kbId) ? f.knowledge_bases.filter(k => k !== kbId) : [...f.knowledge_bases, kbId]
+        }));
+    }
+
+    function toggleToolPack(packTools) {
+        const packIds = packTools.map(t => t.id);
+        const allSelected = packIds.every(id => form.tools.includes(id));
+        setForm(f => ({
+            ...f,
+            tools: allSelected
+                ? f.tools.filter(id => !packIds.includes(id))
+                : [...new Set([...f.tools, ...packIds])]
         }));
     }
 
@@ -596,29 +658,71 @@ export default function AgentsPage() {
                                                 <span>Tools ({form.tools.length} selected)</span>
                                                 {toolsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                             </label>
-                                            {toolsExpanded && (
-                                                <div style={{
-                                                    display: 'flex', flexDirection: 'column', gap: 6,
-                                                    flex: 1, overflowY: 'auto', padding: 8,
-                                                    background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)'
-                                                }}>
-                                                    {tools.map(tool => (
-                                                        <label key={tool.id} style={{
-                                                            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-                                                            borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13,
-                                                            background: form.tools.includes(tool.id) ? 'rgba(124, 58, 237, 0.1)' : 'transparent',
-                                                            border: `1px solid ${form.tools.includes(tool.id) ? 'var(--accent)' : 'transparent'}`
-                                                        }}>
-                                                            <input type="checkbox" checked={form.tools.includes(tool.id)}
-                                                                onChange={() => toggleTool(tool.id)} />
-                                                            <span>{tool.name}</span>
-                                                        </label>
-                                                    ))}
-                                                    {tools.length === 0 && (
-                                                        <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: 8 }}>No tools available</div>
-                                                    )}
-                                                </div>
-                                            )}
+                                            {toolsExpanded && (() => {
+                                                // Group tools: by source_file pack, or 'ungrouped'
+                                                const packs = {};
+                                                const ungrouped = [];
+                                                for (const tool of tools) {
+                                                    if (tool.source_file) {
+                                                        if (!packs[tool.source_file]) packs[tool.source_file] = [];
+                                                        packs[tool.source_file].push(tool);
+                                                    } else {
+                                                        ungrouped.push(tool);
+                                                    }
+                                                }
+                                                const packNames = Object.keys(packs).sort();
+                                                return (
+                                                    <div style={{
+                                                        display: 'flex', flexDirection: 'column', gap: 6,
+                                                        flex: 1, overflowY: 'auto', padding: 8,
+                                                        background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)'
+                                                    }}>
+                                                        {/* Tool Packs */}
+                                                        {packNames.map(packName => {
+                                                            const packTools = packs[packName];
+                                                            const selectedCount = packTools.filter(t => form.tools.includes(t.id)).length;
+                                                            const allSelected = selectedCount === packTools.length;
+                                                            const someSelected = selectedCount > 0 && !allSelected;
+                                                            return (
+                                                                <ToolPackGroup
+                                                                    key={packName}
+                                                                    packName={packName}
+                                                                    packTools={packTools}
+                                                                    selectedCount={selectedCount}
+                                                                    allSelected={allSelected}
+                                                                    someSelected={someSelected}
+                                                                    selectedTools={form.tools}
+                                                                    onTogglePack={() => toggleToolPack(packTools)}
+                                                                    onToggleTool={toggleTool}
+                                                                />
+                                                            );
+                                                        })}
+                                                        {/* Individual Tools (no pack) */}
+                                                        {ungrouped.length > 0 && (
+                                                            <>
+                                                                {packNames.length > 0 && (
+                                                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, padding: '4px 2px', marginTop: 4 }}>INDIVIDUAL TOOLS</div>
+                                                                )}
+                                                                {ungrouped.map(tool => (
+                                                                    <label key={tool.id} style={{
+                                                                        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                                                                        borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13,
+                                                                        background: form.tools.includes(tool.id) ? 'rgba(124, 58, 237, 0.1)' : 'transparent',
+                                                                        border: `1px solid ${form.tools.includes(tool.id) ? 'var(--accent)' : 'transparent'}`
+                                                                    }}>
+                                                                        <input type="checkbox" checked={form.tools.includes(tool.id)}
+                                                                            onChange={() => toggleTool(tool.id)} />
+                                                                        <span>{tool.name}</span>
+                                                                    </label>
+                                                                ))}
+                                                            </>
+                                                        )}
+                                                        {tools.length === 0 && (
+                                                            <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: 8 }}>No tools available</div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
 
                                         <div className="form-group" style={{ display: 'flex', flexDirection: 'column', marginBottom: 0, flex: mcpExpanded ? 1 : 'none' }}>

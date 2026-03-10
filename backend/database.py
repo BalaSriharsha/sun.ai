@@ -481,6 +481,8 @@ async def _run_migrations(db):
         # Agent skills and knowledge extensions
         ("agents", "skills", "TEXT"),
         ("agents", "knowledge_bases", "TEXT"),
+        # Tool pack source tracking
+        ("tools", "source_file", "TEXT"),
     ]
 
     for table, column, col_type in migrations:

@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
-import { Plus, Wrench, Code, Play, Trash2, Edit, Globe, Terminal, FileText, Braces, X, Upload, CheckCircle, AlertCircle, Download, Sparkles, Package, Search, Database, Calculator, Clock, FolderOpen, Type } from 'lucide-react';
+import { Plus, Wrench, Code, Play, Trash2, Edit, Globe, Terminal, FileText, Braces, X, Upload, CheckCircle, AlertCircle, Download, Sparkles, Package, Search, Database, Calculator, Clock, FolderOpen, Type, ChevronDown, ChevronRight } from 'lucide-react';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 
 // Category icons mapping
@@ -32,6 +32,8 @@ const CATEGORY_COLORS = {
     uploaded: { bg: 'rgba(124, 58, 237, 0.12)', color: '#7c3aed' },
 };
 
+const PACK_COLORS = { bg: 'rgba(124, 58, 237, 0.12)', color: '#7c3aed' };
+
 export default function ToolsPage() {
     const { currentOrgId } = useWorkspace();
     const [tools, setTools] = useState([]);
@@ -51,6 +53,9 @@ export default function ToolsPage() {
     const [uploadFile, setUploadFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [uploadResult, setUploadResult] = useState(null);
+
+    // Expanded pack state
+    const [expandedPacks, setExpandedPacks] = useState(new Set());
 
     // Generate Tool Pack state
     const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -223,17 +228,64 @@ export default function ToolsPage() {
         setGenerating(false);
     }
 
-    // Get unique categories
-    const categories = ['all', ...new Set(tools.map(t => t.category || 'custom'))];
+    async function handleDeletePack(packName) {
+        if (!confirm(`Delete the entire "${packName}" tool pack? This will remove all ${packName} tools.`)) return;
+        try {
+            await api.deleteToolPack(packName);
+            setExpandedPacks(prev => { const s = new Set(prev); s.delete(packName); return s; });
+            loadTools();
+        } catch (e) { alert(e.message); }
+    }
 
-    // Filter tools
-    const filteredTools = tools.filter(tool => {
-        const matchesSearch = !searchQuery ||
-            tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (tool.description || '').toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesCategory = selectedCategory === 'all' || tool.category === selectedCategory;
-        return matchesSearch && matchesCategory;
+    function togglePack(packName) {
+        setExpandedPacks(prev => {
+            const s = new Set(prev);
+            if (s.has(packName)) s.delete(packName);
+            else s.add(packName);
+            return s;
+        });
+    }
+
+    // Separate tools into packs and standalone tools
+    const packsMap = {};
+    const standaloneTools = [];
+    tools.forEach(tool => {
+        if (tool.source_file) {
+            if (!packsMap[tool.source_file]) packsMap[tool.source_file] = [];
+            packsMap[tool.source_file].push(tool);
+        } else {
+            standaloneTools.push(tool);
+        }
     });
+    const packsList = Object.entries(packsMap).map(([name, packTools]) => ({ name, tools: packTools }));
+
+    // Get unique categories from standalone tools only
+    const categories = ['all', 'packs', ...new Set(standaloneTools.map(t => t.category || 'custom'))];
+
+    // Filter logic
+    const searchLower = searchQuery.toLowerCase();
+    const filteredPacks = selectedCategory === 'all' || selectedCategory === 'packs'
+        ? packsList.filter(pack =>
+            !searchQuery ||
+            pack.name.toLowerCase().includes(searchLower) ||
+            pack.tools.some(t =>
+                t.name.toLowerCase().includes(searchLower) ||
+                (t.description || '').toLowerCase().includes(searchLower)
+            )
+        )
+        : [];
+
+    const filteredTools = selectedCategory === 'all' || selectedCategory !== 'packs'
+        ? standaloneTools.filter(tool => {
+            const matchesSearch = !searchQuery ||
+                tool.name.toLowerCase().includes(searchLower) ||
+                (tool.description || '').toLowerCase().includes(searchLower);
+            const matchesCategory = selectedCategory === 'all' || tool.category === selectedCategory;
+            return matchesSearch && matchesCategory;
+        })
+        : [];
+
+    const totalVisible = filteredPacks.length + filteredTools.length;
 
     const currentGenerateModels = allModels[generateForm.provider_id] || [];
 
@@ -305,16 +357,19 @@ export default function ToolsPage() {
 
             {/* Tools count */}
             <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--text-secondary)' }}>
-                {filteredTools.length} tool{filteredTools.length !== 1 ? 's' : ''}
+                {filteredPacks.length > 0 && `${filteredPacks.length} pack${filteredPacks.length !== 1 ? 's' : ''}`}
+                {filteredPacks.length > 0 && filteredTools.length > 0 && ', '}
+                {filteredTools.length > 0 && `${filteredTools.length} tool${filteredTools.length !== 1 ? 's' : ''}`}
+                {filteredPacks.length === 0 && filteredTools.length === 0 && '0 results'}
                 {searchQuery && ` matching "${searchQuery}"`}
-                {selectedCategory !== 'all' && ` in ${selectedCategory}`}
+                {selectedCategory !== 'all' && selectedCategory !== 'packs' && ` in ${selectedCategory}`}
             </div>
 
             {loading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
                     <div className="loading-spinner" />
                 </div>
-            ) : filteredTools.length === 0 ? (
+            ) : totalVisible === 0 ? (
                 <div style={{
                     textAlign: 'center',
                     padding: 60,
@@ -327,147 +382,312 @@ export default function ToolsPage() {
                     </p>
                 </div>
             ) : (
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                    gap: 16
-                }}>
-                    {filteredTools.map(tool => {
-                        const category = tool.category || 'custom';
-                        const Icon = CATEGORY_ICONS[category] || Code;
-                        const colors = CATEGORY_COLORS[category] || CATEGORY_COLORS.custom;
-                        const isCustom = tool.tool_type !== 'builtin';
-
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {/* Tool Pack cards */}
+                    {filteredPacks.map(pack => {
+                        const isExpanded = expandedPacks.has(pack.name);
                         return (
-                            <div key={tool.id} style={{
+                            <div key={pack.name} style={{
                                 background: 'var(--bg-secondary)',
                                 border: '1px solid var(--border-color)',
                                 borderRadius: 'var(--radius-lg)',
-                                padding: 20,
-                                display: 'flex',
-                                flexDirection: 'column',
+                                overflow: 'hidden',
                                 transition: 'border-color 0.2s, box-shadow 0.2s',
                             }}
-                            onMouseEnter={e => {
-                                e.currentTarget.style.borderColor = 'var(--accent)';
-                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                            }}
-                            onMouseLeave={e => {
-                                e.currentTarget.style.borderColor = 'var(--border-color)';
-                                e.currentTarget.style.boxShadow = 'none';
-                            }}
+                                onMouseEnter={e => {
+                                    e.currentTarget.style.borderColor = PACK_COLORS.color;
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                                }}
+                                onMouseLeave={e => {
+                                    e.currentTarget.style.borderColor = 'var(--border-color)';
+                                    e.currentTarget.style.boxShadow = 'none';
+                                }}
                             >
-                                {/* Header */}
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                                {/* Pack Header row */}
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 12,
+                                        padding: 20,
+                                        cursor: 'pointer',
+                                        userSelect: 'none',
+                                    }}
+                                    onClick={() => togglePack(pack.name)}
+                                >
                                     <div style={{
                                         width: 40,
                                         height: 40,
                                         borderRadius: 'var(--radius-md)',
-                                        background: colors.bg,
-                                        color: colors.color,
+                                        background: PACK_COLORS.bg,
+                                        color: PACK_COLORS.color,
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
-                                        flexShrink: 0
+                                        flexShrink: 0,
                                     }}>
-                                        <Icon size={20} />
+                                        <Package size={20} />
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                        <h3 style={{
-                                            fontSize: 15,
-                                            fontWeight: 600,
-                                            marginBottom: 2,
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {tool.name}
-                                        </h3>
-                                        <span style={{
-                                            fontSize: 11,
-                                            padding: '2px 8px',
-                                            borderRadius: 'var(--radius-sm)',
-                                            background: colors.bg,
-                                            color: colors.color,
-                                            textTransform: 'capitalize'
-                                        }}>
-                                            {category}
-                                        </span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                                            <h3 style={{
+                                                fontSize: 15,
+                                                fontWeight: 600,
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                whiteSpace: 'nowrap',
+                                            }}>
+                                                {pack.name}
+                                            </h3>
+                                            <span style={{
+                                                fontSize: 11,
+                                                padding: '2px 8px',
+                                                borderRadius: 'var(--radius-sm)',
+                                                background: PACK_COLORS.bg,
+                                                color: PACK_COLORS.color,
+                                                flexShrink: 0,
+                                            }}>
+                                                Tool Pack
+                                            </span>
+                                        </div>
+                                        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0 }}>
+                                            {pack.tools.length} tool{pack.tools.length !== 1 ? 's' : ''}
+                                        </p>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <button
+                                            className="btn btn-ghost btn-sm"
+                                            onClick={e => { e.stopPropagation(); handleDeletePack(pack.name); }}
+                                            title="Delete tool pack"
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                        {isExpanded
+                                            ? <ChevronDown size={16} style={{ color: 'var(--text-tertiary)' }} />
+                                            : <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} />
+                                        }
                                     </div>
                                 </div>
 
-                                {/* Description */}
-                                <p style={{
-                                    fontSize: 13,
-                                    color: 'var(--text-secondary)',
-                                    marginBottom: 16,
-                                    flex: 1,
-                                    lineHeight: 1.5,
-                                    display: '-webkit-box',
-                                    WebkitLineClamp: 2,
-                                    WebkitBoxOrient: 'vertical',
-                                    overflow: 'hidden'
-                                }}>
-                                    {tool.description || 'No description'}
-                                </p>
-
-                                {/* Actions */}
-                                <div style={{
-                                    display: 'flex',
-                                    gap: 8,
-                                    borderTop: '1px solid var(--border-color)',
-                                    paddingTop: 12,
-                                    marginTop: 'auto'
-                                }}>
-                                    <button
-                                        className="btn btn-ghost btn-sm"
-                                        onClick={() => handleDownload(tool)}
-                                        title="Download as tool pack"
-                                    >
-                                        <Download size={14} />
-                                    </button>
-                                    <button
-                                        className="btn btn-ghost btn-sm"
-                                        onClick={() => handleTest(tool)}
-                                        title="Test tool"
-                                    >
-                                        <Play size={14} />
-                                    </button>
-                                    {isCustom && (
-                                        <>
-                                            <button
-                                                className="btn btn-ghost btn-sm"
-                                                onClick={() => openEdit(tool)}
-                                                title="Edit tool"
-                                            >
-                                                <Edit size={14} />
-                                            </button>
-                                            <button
-                                                className="btn btn-ghost btn-sm"
-                                                onClick={() => handleDelete(tool.id)}
-                                                title="Delete tool"
-                                                style={{ marginLeft: 'auto' }}
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </>
-                                    )}
-                                </div>
-
-                                {/* Test Result */}
-                                {testResult?.id === tool.id && (
-                                    <div className="code-block" style={{
-                                        marginTop: 12,
-                                        maxHeight: 150,
-                                        overflow: 'auto',
-                                        fontSize: 11
+                                {/* Expanded tool list */}
+                                {isExpanded && (
+                                    <div style={{
+                                        borderTop: '1px solid var(--border-color)',
+                                        padding: '12px 20px 16px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 10,
                                     }}>
-                                        {JSON.stringify(testResult.result, null, 2)}
+                                        {pack.tools.map(tool => {
+                                            const category = tool.category || 'custom';
+                                            const Icon = CATEGORY_ICONS[category] || Code;
+                                            const colors = CATEGORY_COLORS[category] || CATEGORY_COLORS.custom;
+                                            return (
+                                                <div key={tool.id} style={{
+                                                    display: 'flex',
+                                                    alignItems: 'flex-start',
+                                                    gap: 10,
+                                                    padding: 12,
+                                                    background: 'var(--bg-tertiary)',
+                                                    borderRadius: 'var(--radius-md)',
+                                                    border: '1px solid var(--border-color)',
+                                                }}>
+                                                    <div style={{
+                                                        width: 32,
+                                                        height: 32,
+                                                        borderRadius: 'var(--radius-sm)',
+                                                        background: colors.bg,
+                                                        color: colors.color,
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        flexShrink: 0,
+                                                    }}>
+                                                        <Icon size={16} />
+                                                    </div>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <p style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{tool.name}</p>
+                                                        <p style={{
+                                                            fontSize: 12,
+                                                            color: 'var(--text-secondary)',
+                                                            overflow: 'hidden',
+                                                            display: '-webkit-box',
+                                                            WebkitLineClamp: 1,
+                                                            WebkitBoxOrient: 'vertical',
+                                                            margin: 0,
+                                                        }}>
+                                                            {tool.description || 'No description'}
+                                                        </p>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                                                        <button
+                                                            className="btn btn-ghost btn-sm"
+                                                            onClick={() => handleTest(tool)}
+                                                            title="Test tool"
+                                                        >
+                                                            <Play size={13} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        {/* Test result for tools inside pack */}
+                                        {pack.tools.some(t => testResult?.id === t.id) && (
+                                            <div className="code-block" style={{ marginTop: 4, maxHeight: 150, overflow: 'auto', fontSize: 11 }}>
+                                                {JSON.stringify(testResult.result, null, 2)}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
                         );
                     })}
+
+                    {/* Standalone tool cards */}
+                    {filteredTools.length > 0 && (
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                            gap: 16
+                        }}>
+                            {filteredTools.map(tool => {
+                                const category = tool.category || 'custom';
+                                const Icon = CATEGORY_ICONS[category] || Code;
+                                const colors = CATEGORY_COLORS[category] || CATEGORY_COLORS.custom;
+                                const isCustom = tool.tool_type !== 'builtin';
+
+                                return (
+                                    <div key={tool.id} style={{
+                                        background: 'var(--bg-secondary)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: 'var(--radius-lg)',
+                                        padding: 20,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        transition: 'border-color 0.2s, box-shadow 0.2s',
+                                    }}
+                                        onMouseEnter={e => {
+                                            e.currentTarget.style.borderColor = 'var(--accent)';
+                                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                                        }}
+                                        onMouseLeave={e => {
+                                            e.currentTarget.style.borderColor = 'var(--border-color)';
+                                            e.currentTarget.style.boxShadow = 'none';
+                                        }}
+                                    >
+                                        {/* Header */}
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                                            <div style={{
+                                                width: 40,
+                                                height: 40,
+                                                borderRadius: 'var(--radius-md)',
+                                                background: colors.bg,
+                                                color: colors.color,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0
+                                            }}>
+                                                <Icon size={20} />
+                                            </div>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <h3 style={{
+                                                    fontSize: 15,
+                                                    fontWeight: 600,
+                                                    marginBottom: 2,
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {tool.name}
+                                                </h3>
+                                                <span style={{
+                                                    fontSize: 11,
+                                                    padding: '2px 8px',
+                                                    borderRadius: 'var(--radius-sm)',
+                                                    background: colors.bg,
+                                                    color: colors.color,
+                                                    textTransform: 'capitalize'
+                                                }}>
+                                                    {category}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Description */}
+                                        <p style={{
+                                            fontSize: 13,
+                                            color: 'var(--text-secondary)',
+                                            marginBottom: 16,
+                                            flex: 1,
+                                            lineHeight: 1.5,
+                                            display: '-webkit-box',
+                                            WebkitLineClamp: 2,
+                                            WebkitBoxOrient: 'vertical',
+                                            overflow: 'hidden'
+                                        }}>
+                                            {tool.description || 'No description'}
+                                        </p>
+
+                                        {/* Actions */}
+                                        <div style={{
+                                            display: 'flex',
+                                            gap: 8,
+                                            borderTop: '1px solid var(--border-color)',
+                                            paddingTop: 12,
+                                            marginTop: 'auto'
+                                        }}>
+                                            <button
+                                                className="btn btn-ghost btn-sm"
+                                                onClick={() => handleDownload(tool)}
+                                                title="Download as tool pack"
+                                            >
+                                                <Download size={14} />
+                                            </button>
+                                            <button
+                                                className="btn btn-ghost btn-sm"
+                                                onClick={() => handleTest(tool)}
+                                                title="Test tool"
+                                            >
+                                                <Play size={14} />
+                                            </button>
+                                            {isCustom && (
+                                                <>
+                                                    <button
+                                                        className="btn btn-ghost btn-sm"
+                                                        onClick={() => openEdit(tool)}
+                                                        title="Edit tool"
+                                                    >
+                                                        <Edit size={14} />
+                                                    </button>
+                                                    <button
+                                                        className="btn btn-ghost btn-sm"
+                                                        onClick={() => handleDelete(tool.id)}
+                                                        title="Delete tool"
+                                                        style={{ marginLeft: 'auto' }}
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {/* Test Result */}
+                                        {testResult?.id === tool.id && (
+                                            <div className="code-block" style={{
+                                                marginTop: 12,
+                                                maxHeight: 150,
+                                                overflow: 'auto',
+                                                fontSize: 11
+                                            }}>
+                                                {JSON.stringify(testResult.result, null, 2)}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -601,7 +821,7 @@ export default function ToolsPage() {
                             )}
 
                             {uploadResult && (
-                                <div style={{ marginBottom: 16 }}>
+                                <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
                                     {uploadResult.error ? (
                                         <div style={{
                                             padding: 12,
@@ -613,17 +833,57 @@ export default function ToolsPage() {
                                             <AlertCircle size={16} style={{ marginRight: 8, verticalAlign: 'middle' }} />
                                             {uploadResult.error}
                                         </div>
-                                    ) : uploadResult.total_created > 0 && (
-                                        <div style={{
-                                            padding: 12,
-                                            background: 'rgba(34, 197, 94, 0.1)',
-                                            borderRadius: 'var(--radius-md)',
-                                            color: 'var(--success)',
-                                            fontSize: 13
-                                        }}>
-                                            <CheckCircle size={16} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-                                            {uploadResult.total_created} tool{uploadResult.total_created !== 1 ? 's' : ''} created
-                                        </div>
+                                    ) : (
+                                        <>
+                                            {uploadResult.total_created > 0 && (
+                                                <div style={{
+                                                    padding: 12,
+                                                    background: 'rgba(34, 197, 94, 0.1)',
+                                                    borderRadius: 'var(--radius-md)',
+                                                    color: 'var(--success)',
+                                                    fontSize: 13
+                                                }}>
+                                                    <CheckCircle size={16} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+                                                    {uploadResult.total_created} tool{uploadResult.total_created !== 1 ? 's' : ''} created successfully
+                                                </div>
+                                            )}
+                                            {uploadResult.errors && uploadResult.errors.length > 0 && (
+                                                <div style={{
+                                                    padding: 12,
+                                                    background: 'rgba(239, 68, 68, 0.1)',
+                                                    borderRadius: 'var(--radius-md)',
+                                                    fontSize: 13
+                                                }}>
+                                                    <div style={{ color: 'var(--error)', marginBottom: 6, fontWeight: 600 }}>
+                                                        <AlertCircle size={16} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+                                                        {uploadResult.errors.length} tool{uploadResult.errors.length !== 1 ? 's' : ''} skipped:
+                                                    </div>
+                                                    {uploadResult.errors.map((err, i) => (
+                                                        <div key={i} style={{
+                                                            color: 'var(--text-secondary)',
+                                                            fontSize: 12,
+                                                            paddingLeft: 24,
+                                                            marginTop: 4,
+                                                            lineHeight: 1.4
+                                                        }}>
+                                                            • {err.function ? `${err.function}: ` : ''}{err.error}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {uploadResult.total_created === 0 && (!uploadResult.errors || uploadResult.errors.length === 0) && (
+                                                <div style={{
+                                                    padding: 12,
+                                                    background: 'rgba(239, 68, 68, 0.1)',
+                                                    borderRadius: 'var(--radius-md)',
+                                                    color: 'var(--error)',
+                                                    fontSize: 13
+                                                }}>
+                                                    <AlertCircle size={16} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+                                                    No tools were created. Check the file contains public Python functions.
+                                                </div>
+                                            )}
+                                        </>
                                     )}
                                 </div>
                             )}
@@ -631,9 +891,9 @@ export default function ToolsPage() {
 
                         <div className="modal-actions">
                             <button type="button" className="btn btn-secondary" onClick={closeUploadModal}>
-                                {uploadResult?.total_created > 0 ? 'Done' : 'Cancel'}
+                                {uploadResult ? 'Done' : 'Cancel'}
                             </button>
-                            {!uploadResult?.total_created && (
+                            {!uploadResult && (
                                 <button
                                     className="btn btn-primary"
                                     onClick={handleUpload}
