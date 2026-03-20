@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { api, apiStream } from '@/lib/api';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -7,7 +7,7 @@ import { Send, Plus, Trash2, Settings, Bot, User, Loader, MessageSquare, GitBran
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-export default function PlaygroundPage() {
+function PlaygroundContent() {
     const { currentWorkspaceId, currentOrgId } = useWorkspace();
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -1014,5 +1014,13 @@ export default function PlaygroundPage() {
                 )}
             </div>
         </div>
+    );
+}
+
+export default function PlaygroundPage() {
+    return (
+        <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-secondary)' }}>Loading...</div>}>
+            <PlaygroundContent />
+        </Suspense>
     );
 }
