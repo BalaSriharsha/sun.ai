@@ -726,14 +726,15 @@ async def validate_api_key(provider_type: str, api_key: str, base_url: str = Non
 
             def _validate_bedrock_sync():
                 import boto3
-                client = boto3.client(
-                    'bedrock',
+                # Use STS GetCallerIdentity — always permitted for any valid credential,
+                # no Bedrock-specific IAM policy required, and very lightweight.
+                sts = boto3.client(
+                    'sts',
                     aws_access_key_id=access_key,
                     aws_secret_access_key=secret_key,
                     region_name=region
                 )
-                # Try to list models to validate credentials
-                client.list_foundation_models(maxResults=1)
+                sts.get_caller_identity()
                 return True
 
             try:
