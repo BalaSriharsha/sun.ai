@@ -14,6 +14,7 @@ class ProviderCreate(BaseModel):
     type: str  # openai, anthropic, google, groq, mistral, ollama, openrouter
     org_id: str  # Required: providers are organization-scoped
     api_key: Optional[str] = None
+    aws_secret_key: Optional[str] = None  # Bedrock: provided separately, combined with api_key
     base_url: Optional[str] = None
     api_version: Optional[str] = None
     config: Optional[dict] = {}
@@ -21,6 +22,7 @@ class ProviderCreate(BaseModel):
 class ProviderUpdate(BaseModel):
     name: Optional[str] = None
     api_key: Optional[str] = None
+    aws_secret_key: Optional[str] = None  # Bedrock: provided separately, combined with api_key
     base_url: Optional[str] = None
     api_version: Optional[str] = None
     status: Optional[str] = None
@@ -62,6 +64,12 @@ async def create_provider(provider: ProviderCreate):
     valid_types = ["openai", "anthropic", "google", "groq", "mistral", "ollama", "openrouter", "azure", "bedrock", "sarvam"]
     if provider.type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Invalid provider type. Must be one of: {valid_types}")
+
+    # For Bedrock, combine access key + secret key into the stored format
+    if provider.type == "bedrock" and provider.aws_secret_key:
+        if not provider.api_key:
+            raise HTTPException(status_code=400, detail="AWS Access Key ID is required")
+        provider = provider.model_copy(update={"api_key": f"{provider.api_key}:{provider.aws_secret_key}"})
 
     # Validate API key
     if provider.type != "ollama" and not provider.api_key:
@@ -136,7 +144,15 @@ async def update_provider(provider_id: str, update: ProviderUpdate):
         existing = dict(row)
         now = datetime.utcnow().isoformat()
         name = update.name or existing["name"]
-        api_key = update.api_key or existing["api_key_encrypted"]
+
+        # For Bedrock updates, rebuild the combined key if either part is provided
+        if existing["type"] == "bedrock" and (update.api_key or update.aws_secret_key):
+            existing_access, _, existing_secret = (existing["api_key_encrypted"] or "::").partition(":")
+            new_access = update.api_key or existing_access
+            new_secret = update.aws_secret_key or existing_secret
+            api_key = f"{new_access}:{new_secret}"
+        else:
+            api_key = update.api_key or existing["api_key_encrypted"]
         base_url = update.base_url if update.base_url is not None else existing["base_url"]
         api_version = update.api_version if update.api_version is not None else existing.get("api_version")
         status = update.status or existing["status"]

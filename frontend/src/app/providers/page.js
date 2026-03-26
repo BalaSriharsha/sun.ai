@@ -24,7 +24,7 @@ export default function ProvidersPage() {
     const [showModal, setShowModal] = useState(false);
     const [expandedProvider, setExpandedProvider] = useState(null);
     const [models, setModels] = useState({});
-    const [form, setForm] = useState({ name: '', type: 'openai', api_key: '', base_url: '', api_version: '' });
+    const [form, setForm] = useState({ name: '', type: 'openai', api_key: '', aws_secret_key: '', base_url: '', api_version: '' });
     const [formError, setFormError] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
@@ -49,17 +49,20 @@ export default function ProvidersPage() {
         setFormError('');
         setSubmitting(true);
         try {
+            const resolvedApiKey = form.type === 'bedrock'
+                ? `${form.api_key}:${form.aws_secret_key}`
+                : form.api_key;
             const data = {
                 name: form.name,
                 type: form.type,
-                api_key: form.api_key,
-                org_id: currentOrgId,  // Providers are organization-scoped
+                api_key: resolvedApiKey,
+                org_id: currentOrgId,
             };
             if (form.base_url) data.base_url = form.base_url;
             if (form.api_version) data.api_version = form.api_version;
             await api.createProvider(data);
             setShowModal(false);
-            setForm({ name: '', type: 'openai', api_key: '', base_url: '', api_version: '' });
+            setForm({ name: '', type: 'openai', api_key: '', aws_secret_key: '', base_url: '', api_version: '' });
             loadProviders();
         } catch (e) {
             setFormError(e.message);
@@ -227,18 +230,35 @@ export default function ProvidersPage() {
                             <div className="form-group">
                                 <label className="form-label">Provider Type</label>
                                 <select className="form-select" value={form.type}
-                                    onChange={e => setForm({ ...form, type: e.target.value })}>
+                                    onChange={e => setForm({ ...form, type: e.target.value, api_key: '', aws_secret_key: '' })}>
                                     {PROVIDER_TYPES.map(t => (
                                         <option key={t.value} value={t.value}>{t.label}</option>
                                     ))}
                                 </select>
                             </div>
-                            <div className="form-group">
-                                <label className="form-label">API Key {form.type === 'ollama' && '(optional for local)'}{form.type === 'bedrock' && ' (format: access_key:secret_key)'}</label>
-                                <input className="form-input" type="password" placeholder={form.type === 'bedrock' ? 'AKIAIOSFODNN7EXAMPLE:wJalr...' : 'sk-...'}
-                                    value={form.api_key} onChange={e => setForm({ ...form, api_key: e.target.value })}
-                                    required={form.type !== 'ollama'} />
-                            </div>
+                            {form.type === 'bedrock' ? (
+                                <>
+                                    <div className="form-group">
+                                        <label className="form-label">AWS Access Key ID</label>
+                                        <input className="form-input" type="password" placeholder="AKIAIOSFODNN7EXAMPLE"
+                                            value={form.api_key} onChange={e => setForm({ ...form, api_key: e.target.value })}
+                                            required />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">AWS Secret Access Key</label>
+                                        <input className="form-input" type="password" placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                                            value={form.aws_secret_key} onChange={e => setForm({ ...form, aws_secret_key: e.target.value })}
+                                            required />
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="form-group">
+                                    <label className="form-label">API Key {form.type === 'ollama' && '(optional for local)'}</label>
+                                    <input className="form-input" type="password" placeholder="sk-..."
+                                        value={form.api_key} onChange={e => setForm({ ...form, api_key: e.target.value })}
+                                        required={form.type !== 'ollama'} />
+                                </div>
+                            )}
                             {(['ollama', 'openai', 'azure', 'bedrock', 'sarvam'].includes(form.type)) && (
                                 <div className="form-group">
                                     <label className="form-label">Base URL {form.type === 'azure' ? '(required)' : '(optional)'}</label>
@@ -273,7 +293,7 @@ export default function ProvidersPage() {
                             )}
                             {formError && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{formError}</p>}
                             <div className="modal-actions">
-                                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
+                                <button type="button" className="btn btn-secondary" onClick={() => { setShowModal(false); setForm({ name: '', type: 'openai', api_key: '', aws_secret_key: '', base_url: '', api_version: '' }); setFormError(''); }}>Cancel</button>
                                 <button type="submit" className="btn btn-primary" disabled={submitting}>
                                     {submitting ? <><div className="loading-spinner" style={{ width: 16, height: 16 }} /> Validating...</> : 'Add Provider'}
                                 </button>
