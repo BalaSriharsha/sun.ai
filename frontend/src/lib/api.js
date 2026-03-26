@@ -1,4 +1,14 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+const getApiBase = () => {
+    if (typeof window !== 'undefined') {
+        // Derive backend URL from the browser's current host so the same Docker
+        // image works on localhost, EC2, or any domain without a rebuild.
+        const { protocol, hostname } = window.location;
+        return `${protocol}//${hostname}:8000/api`;
+    }
+    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+};
+
+const API_BASE = getApiBase();
 
 let currentUserEmail = typeof window !== 'undefined' ? localStorage.getItem('agentic_user_email') : null;
 
